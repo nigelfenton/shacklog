@@ -139,8 +139,12 @@ void TciClient::parseLine(const QString& line)
                 emit frequencyChanged(m_freqMhz);
             }
         }
-    } else if (cmd == "mode" && args.size() >= 2) {
+    } else if ((cmd == "mode" || cmd == "modulation") && args.size() >= 2) {
         // mode:rx,modeString — track RX 0 only.
+        // AetherSDR sends `modulation:` instead of `mode:` (with the same
+        // arg shape and a lowercase mode string like "lsb"); accept both
+        // so a single TciClient works against AetherSDR, ExpertSDR2, and
+        // SunSDR-mb1 without per-server branching.
         if (args[0].trimmed() == "0") {
             const QString m = args[1].trimmed().toUpper();
             if (m != m_mode) {
