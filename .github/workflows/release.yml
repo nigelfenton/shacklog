@@ -119,12 +119,20 @@ jobs:
           modules: 'qtwebsockets'
           cache: true
 
-      - name: Trim unused Qt SQL drivers
-        # linuxdeploy-plugin-qt tries to bundle every plugin in
-        # $QT_ROOT_DIR/plugins/sqldrivers and fails when one of them links
-        # against a system library the runner doesn't have (e.g.
-        # libmimerapi.so for the Mimer driver, libpq for PostgreSQL).  We
-        # only use SQLite — drop the others so deployment succeeds.
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Trim unused Qt SQL drivers (post-build, pre-AppImage)
+        # linuxdeploy-plugin-qt scans $QT_ROOT_DIR/plugins/sqldrivers and
+        # tries to bundle every driver, failing when one links against a
+        # system library the runner doesn't have (e.g. libmimerapi.so for
+        # the Mimer driver).  We only use SQLite.  This MUST run after
+        # Build because Qt6Sql's CMake config references the driver
+        # filenames directly during configure — deleting them earlier
+        # breaks Qt6QMYSQLDriverPlugin's imported target.
         run: |
           cd "$QT_ROOT_DIR/plugins/sqldrivers"
           ls -1 | tee before.txt
@@ -132,12 +140,6 @@ jobs:
                  ! -name 'libqsqlite.so' -delete
           echo "---"
           ls -1 | tee after.txt
-
-      - name: Configure
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build
-        run: cmake --build build
 
       - name: Stage AppDir
         run: |
