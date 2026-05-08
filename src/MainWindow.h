@@ -1,0 +1,145 @@
+#pragma once
+
+// MainWindow — top-level ShackLog UI.
+//
+// Layout (top → bottom):
+//   • MenuBar    — File / Edit / Tools / Help
+//   • Header     — operator callsign | current freq / band / mode | TCI dot
+//   • QuickEntry — CALL / RST sent / RST rcvd / comment / [SAVE] + DUPE badge
+//                  (with optional contest sub-row when contestMode is on)
+//   • Filter     — text / band / mode / contest / Reset
+//   • Table      — QSO table, newest first
+//   • Actions    — count label | [New] [Edit] [Delete]
+//   • StatusBar  — TCI server endpoint | DB path
+//
+// Owns the LogbookModel and a TciClient singleton.
+
+#include <QMainWindow>
+
+class QAction;
+class QComboBox;
+class QFrame;
+class QLabel;
+class QLineEdit;
+class QPushButton;
+class QTableWidget;
+
+namespace ShackLog {
+
+class LogbookModel;
+class TciClient;
+
+class MainWindow : public QMainWindow {
+    Q_OBJECT
+public:
+    explicit MainWindow(QWidget* parent = nullptr);
+    ~MainWindow() override;
+
+private slots:
+    // Quick-entry
+    void onCallEdited(const QString& text);
+    void onSaveQso();
+
+    // Table / filter
+    void onFilterChanged();
+    void onResetFilter();
+    void onLogbookChanged();
+    void onContextSettingsChanged();
+
+    // Actions
+    void onNewQso();
+    void onEditQso();
+    void onDeleteQso();
+    void onSettings();
+    void onExportAdif();
+    void onExportCabrillo();
+    void onAbout();
+
+    // TCI
+    void onConnectTci();
+    void onDisconnectTci();
+    void onTciConnectionChanged(bool connected);
+    void onTciFrequencyChanged(double mhz);
+    void onTciModeChanged(const QString& mode);
+
+private:
+    void buildUI();
+    void buildMenus();
+    void refreshHeader();
+    void refreshQuickEntry();
+    void refreshContestUI();
+    void refreshTable();
+    void populateBandFilter();
+    void populateModeFilter();
+    void populateContestFilter();
+    void refreshDupBadge();
+    void refreshStatusBar();
+    void applyAutoConnectFromSettings();
+    qint64 selectedQsoId() const;
+
+    LogbookModel* m_model{nullptr};
+    TciClient*    m_tci{nullptr};
+
+    // Cached TCI state
+    double  m_curFreqMhz{0.0};
+    QString m_curBand;
+    QString m_curMode;       // ADIF base mode
+    QString m_curSubmode;    // ADIF submode (USB/LSB)
+    QString m_rawTciMode;    // for display only
+
+    // Header
+    QLabel*  m_myCallLabel{};
+    QLabel*  m_freqLabel{};
+    QLabel*  m_bandLabel{};
+    QLabel*  m_modeLabel{};
+    QLabel*  m_tciDot{};
+    QLabel*  m_tciStatus{};
+
+    // Quick entry
+    QLineEdit*   m_callEdit{};
+    QLineEdit*   m_rstSentEdit{};
+    QLineEdit*   m_rstRcvdEdit{};
+    QLineEdit*   m_commentEdit{};
+    QPushButton* m_saveBtn{};
+    QLabel*      m_dupBadge{};
+
+    // Contest sub-row
+    QFrame*    m_contestFrame{};
+    QLabel*    m_contestIdLabel{};
+    QLineEdit* m_stxEdit{};
+    QLineEdit* m_stxStringEdit{};
+    QLineEdit* m_srxEdit{};
+    QLineEdit* m_srxStringEdit{};
+
+    // Filter row
+    QLineEdit*   m_filterText{};
+    QComboBox*   m_filterBand{};
+    QComboBox*   m_filterMode{};
+    QComboBox*   m_filterContest{};
+    QPushButton* m_resetBtn{};
+
+    // Table + actions
+    QTableWidget* m_table{};
+    QLabel*       m_countLabel{};
+    QPushButton*  m_newBtn{};
+    QPushButton*  m_editBtn{};
+    QPushButton*  m_deleteBtn{};
+
+    // Status bar permanent widgets
+    QLabel* m_sbTci{};
+    QLabel* m_sbDb{};
+
+    // Menu actions
+    QAction* m_actExportAdif{};
+    QAction* m_actExportCab{};
+    QAction* m_actSettings{};
+    QAction* m_actConnectTci{};
+    QAction* m_actDisconnectTci{};
+    QAction* m_actNew{};
+    QAction* m_actEdit{};
+    QAction* m_actDelete{};
+    QAction* m_actAbout{};
+    QAction* m_actQuit{};
+};
+
+} // namespace ShackLog

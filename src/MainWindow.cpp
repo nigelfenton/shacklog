@@ -1,0 +1,852 @@
+#include "MainWindow.h"
+
+#include "LogbookModel.h"
+#include "TciClient.h"
+#include "EditDialog.h"
+#include "SettingsDialog.h"
+
+#include <QAction>
+#include <QApplication>
+#include <QCloseEvent>
+#include <QComboBox>
+#include <QDateTime>
+#include <QFileDialog>
+#include <QFrame>
+#include <QHBoxLayout>
+#include <QHeaderView>
+#include <QIntValidator>
+#include <QLabel>
+#include <QLineEdit>
+#include <QMenu>
+#include <QMenuBar>
+#include <QMessageBox>
+#include <QPushButton>
+#include <QRegularExpression>
+#include <QRegularExpressionValidator>
+#include <QSet>
+#include <QSignalBlocker>
+#include <QStandardPaths>
+#include <QStatusBar>
+#include <QStringList>
+#include <QStyle>
+#include <QTableWidget>
+#include <QTableWidgetItem>
+#include <QVBoxLayout>
+
+namespace ShackLog {
+
+namespace {
+
+// ── Stylesheets ─────────────────────────────────────────────────────────
+constexpr const char* kHeaderCallStyle =
+    "QLabel { color: #00d8ef; font-size: 16px; font-weight: bold; "
+    "font-family: Consolas, 'Cascadia Mono', monospace; }";
+
+constexpr const char* kHeaderValueStyle =
+    "QLabel { color: #ffd400; font-size: 14px; font-weight: bold; "
+    "font-family: Consolas, 'Cascadia Mono', monospace; }";
+
+constexpr const char* kHeaderLabelStyle =
+    "QLabel { color: #6b8099; font-size: 9px; font-weight: bold; "
+    "letter-spacing: 0.08em; }";
+
+constexpr const char* kCallEditStyle =
+    "QLineEdit { background: #0b1220; border: 1px solid #1c2a40; border-radius: 3px; "
+    "padding: 5px 8px; font-size: 16px; font-weight: bold; color: #ffd400; "
+    "font-family: Consolas, 'Cascadia Mono', monospace; letter-spacing: 0.05em; }"
+    "QLineEdit:focus { border: 1px solid #00d8ef; }";
+
+constexpr const char* kEditStyle =
+    "QLineEdit { background: #0b1220; border: 1px solid #1c2a40; border-radius: 3px; "
+    "padding: 4px 6px; font-size: 12px; color: #dde6f0; }"
+    "QLineEdit:focus { border: 1px solid #00d8ef; }";
+
+constexpr const char* kSaveBtnStyle =
+    "QPushButton { background: #003040; border: 1px solid #00d8ef; border-radius: 3px; "
+    "padding: 6px 16px; font-size: 12px; font-weight: bold; color: #00d8ef; }"
+    "QPushButton:hover { background: #00475e; }"
+    "QPushButton:disabled { background: #0b1220; border: 1px solid #1c2a40; color: #3a4a60; }";
+
+constexpr const char* kDupBadgeIdle =
+    "QLabel { color: transparent; font-size: 11px; font-weight: bold; "
+    "letter-spacing: 0.1em; }";
+constexpr const char* kDupBadgeHit =
+    "QLabel { color: #ff5050; font-size: 11px; font-weight: bold; "
+    "letter-spacing: 0.1em; }";
+
+constexpr const char* kTciDotConnected =
+    "QLabel { color: #4cff7c; font-size: 14px; }";
+constexpr const char* kTciDotDisconnected =
+    "QLabel { color: #6b8099; font-size: 14px; }";
+
+QString askSavePath(QWidget* parent, const QString& title, const QString& filter,
+                    const QString& defaultName)
+{
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    return QFileDialog::getSaveFileName(parent, title, dir + "/" + defaultName, filter);
+}
+
+} // namespace
+
+// ─────────────────────────────────────────────────────────────────────────
+
+MainWindow::MainWindow(QWidget* parent)
+    : QMainWindow(parent),
+      m_model(new LogbookModel(this)),
+      m_tci(new TciClient(this))
+{
+    setWindowTitle("ShackLog");
+    resize(1200, 700);
+
+    if (!m_model->open()) {
+        QMessageBox::critical(this, "ShackLog",
+                              QString("Could not open logbook database:\n%1")
+                                  .arg(m_model->errorString()));
+    }
+
+    buildMenus();
+    buildUI();
+
+    connect(m_model, &LogbookModel::qsoAdded,    this, &MainWindow::onLogbookChanged);
+    connect(m_model, &LogbookModel::qsoUpdated,  this, &MainWindow::onLogbookChanged);
+    connect(m_model, &LogbookModel::qsoDeleted,  this, &MainWindow::onLogbookChanged);
+    connect(m_model, &LogbookModel::settingChanged,
+            this, &MainWindow::onContextSettingsChanged);
+
+    connect(m_tci, &TciClient::connectionChanged, this, &MainWindow::onTciConnectionChanged);
+    connect(m_tci, &TciClient::frequencyChanged,  this, &MainWindow::onTciFrequencyChanged);
+    connect(m_tci, &TciClient::modeChanged,       this, &MainWindow::onTciModeChanged);
+
+    refreshHeader();
+    refreshContestUI();
+    refreshTable();
+    populateBandFilter();
+    populateModeFilter();
+    populateContestFilter();
+    refreshStatusBar();
+
+    applyAutoConnectFromSettings();
+}
+
+MainWindow::~MainWindow() = default;
+
+// ── Menus ──────────────────────────────────────────────────────────────
+
+void MainWindow::buildMenus()
+{
+    auto* fileMenu = menuBar()->addMenu("&File");
+    m_actExportAdif = fileMenu->addAction("Export &ADIF…", this, &MainWindow::onExportAdif);
+    m_actExportCab  = fileMenu->addAction("Export &Cabrillo…", this, &MainWindow::onExportCabrillo);
+    fileMenu->addSeparator();
+    m_actQuit = fileMenu->addAction("&Quit", this, &QWidget::close);
+    m_actQuit->setShortcut(QKeySequence::Quit);
+
+    auto* editMenu = menuBar()->addMenu("&Edit");
+    m_actNew    = editMenu->addAction("&New QSO…",    this, &MainWindow::onNewQso);
+    m_actNew->setShortcut(QKeySequence::New);
+    m_actEdit   = editMenu->addAction("&Edit QSO…",   this, &MainWindow::onEditQso);
+    m_actDelete = editMenu->addAction("&Delete QSO",  this, &MainWindow::onDeleteQso);
+
+    auto* toolsMenu = menuBar()->addMenu("&Tools");
+    m_actSettings      = toolsMenu->addAction("&Settings…", this, &MainWindow::onSettings);
+    toolsMenu->addSeparator();
+    m_actConnectTci    = toolsMenu->addAction("&Connect TCI",    this, &MainWindow::onConnectTci);
+    m_actDisconnectTci = toolsMenu->addAction("&Disconnect TCI", this, &MainWindow::onDisconnectTci);
+
+    auto* helpMenu = menuBar()->addMenu("&Help");
+    m_actAbout = helpMenu->addAction("&About ShackLog", this, &MainWindow::onAbout);
+}
+
+// ── Layout ─────────────────────────────────────────────────────────────
+
+void MainWindow::buildUI()
+{
+    auto* central = new QWidget;
+    setCentralWidget(central);
+
+    auto* main = new QVBoxLayout(central);
+    main->setContentsMargins(8, 6, 8, 6);
+    main->setSpacing(6);
+
+    // ── Header strip ────────────────────────────────────────────────────
+    {
+        auto* row = new QHBoxLayout;
+        row->setSpacing(14);
+
+        m_myCallLabel = new QLabel("(no call)");
+        m_myCallLabel->setStyleSheet(kHeaderCallStyle);
+
+        auto* freqBlock = new QVBoxLayout;
+        freqBlock->setSpacing(0);
+        auto* fL = new QLabel("FREQ"); fL->setStyleSheet(kHeaderLabelStyle);
+        m_freqLabel = new QLabel("—");
+        m_freqLabel->setStyleSheet(kHeaderValueStyle);
+        freqBlock->addWidget(fL); freqBlock->addWidget(m_freqLabel);
+
+        auto* bandBlock = new QVBoxLayout;
+        bandBlock->setSpacing(0);
+        auto* bL = new QLabel("BAND"); bL->setStyleSheet(kHeaderLabelStyle);
+        m_bandLabel = new QLabel("—");
+        m_bandLabel->setStyleSheet(kHeaderValueStyle);
+        bandBlock->addWidget(bL); bandBlock->addWidget(m_bandLabel);
+
+        auto* modeBlock = new QVBoxLayout;
+        modeBlock->setSpacing(0);
+        auto* mL = new QLabel("MODE"); mL->setStyleSheet(kHeaderLabelStyle);
+        m_modeLabel = new QLabel("—");
+        m_modeLabel->setStyleSheet(kHeaderValueStyle);
+        modeBlock->addWidget(mL); modeBlock->addWidget(m_modeLabel);
+
+        m_tciDot    = new QLabel("●");
+        m_tciDot->setStyleSheet(kTciDotDisconnected);
+        m_tciStatus = new QLabel("TCI offline");
+        m_tciStatus->setStyleSheet(kHeaderLabelStyle);
+
+        row->addWidget(m_myCallLabel);
+        row->addSpacing(20);
+        row->addLayout(freqBlock);
+        row->addLayout(bandBlock);
+        row->addLayout(modeBlock);
+        row->addStretch();
+        row->addWidget(m_tciDot);
+        row->addWidget(m_tciStatus);
+        main->addLayout(row);
+    }
+
+    // separator
+    {
+        auto* sep = new QFrame;
+        sep->setFrameShape(QFrame::HLine);
+        sep->setStyleSheet("color: #1c2a40;");
+        main->addWidget(sep);
+    }
+
+    // ── Quick entry row ────────────────────────────────────────────────
+    {
+        auto* row = new QHBoxLayout;
+        row->setSpacing(8);
+
+        auto* lc = new QLabel("CALL"); lc->setStyleSheet(kHeaderLabelStyle);
+        m_callEdit = new QLineEdit;
+        m_callEdit->setStyleSheet(kCallEditStyle);
+        m_callEdit->setPlaceholderText("DX call");
+        m_callEdit->setMinimumWidth(180);
+        m_callEdit->setValidator(new QRegularExpressionValidator(
+            QRegularExpression{"^[A-Za-z0-9/\\-]{0,16}$"}, this));
+        connect(m_callEdit, &QLineEdit::textEdited, this, &MainWindow::onCallEdited);
+        connect(m_callEdit, &QLineEdit::returnPressed, this, &MainWindow::onSaveQso);
+
+        auto* lrs = new QLabel("RST→"); lrs->setStyleSheet(kHeaderLabelStyle);
+        m_rstSentEdit = new QLineEdit("59");
+        m_rstSentEdit->setStyleSheet(kEditStyle);
+        m_rstSentEdit->setMaximumWidth(56);
+        m_rstSentEdit->setMaxLength(4);
+
+        auto* lrr = new QLabel("←RST"); lrr->setStyleSheet(kHeaderLabelStyle);
+        m_rstRcvdEdit = new QLineEdit("59");
+        m_rstRcvdEdit->setStyleSheet(kEditStyle);
+        m_rstRcvdEdit->setMaximumWidth(56);
+        m_rstRcvdEdit->setMaxLength(4);
+
+        auto* lc2 = new QLabel("COMMENT"); lc2->setStyleSheet(kHeaderLabelStyle);
+        m_commentEdit = new QLineEdit;
+        m_commentEdit->setStyleSheet(kEditStyle);
+        m_commentEdit->setPlaceholderText("comment / exchange");
+
+        m_dupBadge = new QLabel("DUPE");
+        m_dupBadge->setStyleSheet(kDupBadgeIdle);
+
+        m_saveBtn = new QPushButton("SAVE QSO  ↵");
+        m_saveBtn->setStyleSheet(kSaveBtnStyle);
+        m_saveBtn->setEnabled(false);
+        connect(m_saveBtn, &QPushButton::clicked, this, &MainWindow::onSaveQso);
+
+        row->addWidget(lc);
+        row->addWidget(m_callEdit);
+        row->addSpacing(8);
+        row->addWidget(lrs);  row->addWidget(m_rstSentEdit);
+        row->addWidget(lrr);  row->addWidget(m_rstRcvdEdit);
+        row->addSpacing(8);
+        row->addWidget(lc2);
+        row->addWidget(m_commentEdit, 1);
+        row->addWidget(m_dupBadge);
+        row->addWidget(m_saveBtn);
+        main->addLayout(row);
+    }
+
+    // ── Contest sub-row (visibility tied to contestMode) ───────────────
+    {
+        m_contestFrame = new QFrame;
+        m_contestFrame->setStyleSheet(
+            "QFrame { background: #0d1e30; border: 1px solid #1c2a40; "
+            "border-radius: 3px; }");
+        auto* row = new QHBoxLayout(m_contestFrame);
+        row->setContentsMargins(8, 4, 8, 4);
+        row->setSpacing(6);
+
+        m_contestIdLabel = new QLabel("(no contest)");
+        m_contestIdLabel->setStyleSheet(
+            "QLabel { color: #ffaa00; font-size: 11px; font-weight: bold; "
+            "letter-spacing: 0.08em; border: none; }");
+
+        auto* lstx = new QLabel("STX"); lstx->setStyleSheet("QLabel { border: none; color: #6b8099; font-size: 9px; font-weight: bold; }");
+        m_stxEdit = new QLineEdit;
+        m_stxEdit->setStyleSheet(kEditStyle);
+        m_stxEdit->setMaximumWidth(60);
+        m_stxEdit->setValidator(new QIntValidator(0, 999999, this));
+
+        auto* lstxs = new QLabel("STX exch"); lstxs->setStyleSheet("QLabel { border: none; color: #6b8099; font-size: 9px; font-weight: bold; }");
+        m_stxStringEdit = new QLineEdit;
+        m_stxStringEdit->setStyleSheet(kEditStyle);
+        m_stxStringEdit->setMaximumWidth(120);
+
+        auto* lsrx = new QLabel("SRX"); lsrx->setStyleSheet("QLabel { border: none; color: #6b8099; font-size: 9px; font-weight: bold; }");
+        m_srxEdit = new QLineEdit;
+        m_srxEdit->setStyleSheet(kEditStyle);
+        m_srxEdit->setMaximumWidth(60);
+        m_srxEdit->setValidator(new QIntValidator(0, 999999, this));
+
+        auto* lsrxs = new QLabel("SRX exch"); lsrxs->setStyleSheet("QLabel { border: none; color: #6b8099; font-size: 9px; font-weight: bold; }");
+        m_srxStringEdit = new QLineEdit;
+        m_srxStringEdit->setStyleSheet(kEditStyle);
+        m_srxStringEdit->setMaximumWidth(120);
+
+        row->addWidget(m_contestIdLabel);
+        row->addSpacing(12);
+        row->addWidget(lstx);  row->addWidget(m_stxEdit);
+        row->addWidget(lstxs); row->addWidget(m_stxStringEdit);
+        row->addSpacing(12);
+        row->addWidget(lsrx);  row->addWidget(m_srxEdit);
+        row->addWidget(lsrxs); row->addWidget(m_srxStringEdit);
+        row->addStretch();
+
+        m_contestFrame->hide();
+        main->addWidget(m_contestFrame);
+    }
+
+    // separator
+    {
+        auto* sep = new QFrame;
+        sep->setFrameShape(QFrame::HLine);
+        sep->setStyleSheet("color: #1c2a40;");
+        main->addWidget(sep);
+    }
+
+    // ── Filter row ─────────────────────────────────────────────────────
+    {
+        auto* row = new QHBoxLayout;
+        row->setSpacing(6);
+        m_filterText = new QLineEdit;
+        m_filterText->setPlaceholderText("Filter by call / name / QTH / grid / comment");
+        m_filterText->setStyleSheet(kEditStyle);
+        connect(m_filterText, &QLineEdit::textChanged, this, &MainWindow::onFilterChanged);
+
+        m_filterBand    = new QComboBox; m_filterBand->setMinimumWidth(80);
+        m_filterMode    = new QComboBox; m_filterMode->setMinimumWidth(80);
+        m_filterContest = new QComboBox; m_filterContest->setMinimumWidth(160);
+        connect(m_filterBand,    &QComboBox::currentIndexChanged, this, &MainWindow::onFilterChanged);
+        connect(m_filterMode,    &QComboBox::currentIndexChanged, this, &MainWindow::onFilterChanged);
+        connect(m_filterContest, &QComboBox::currentIndexChanged, this, &MainWindow::onFilterChanged);
+
+        m_resetBtn = new QPushButton("Reset");
+        connect(m_resetBtn, &QPushButton::clicked, this, &MainWindow::onResetFilter);
+
+        row->addWidget(m_filterText, 1);
+        row->addWidget(m_filterBand);
+        row->addWidget(m_filterMode);
+        row->addWidget(m_filterContest);
+        row->addWidget(m_resetBtn);
+        main->addLayout(row);
+    }
+
+    // ── Table ──────────────────────────────────────────────────────────
+    {
+        m_table = new QTableWidget;
+        m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
+        m_table->setSelectionMode(QAbstractItemView::SingleSelection);
+        m_table->setAlternatingRowColors(true);
+        m_table->verticalHeader()->setVisible(false);
+        m_table->setColumnCount(13);
+        m_table->setHorizontalHeaderLabels({
+            "Date", "Time", "Call", "Band", "Mode", "Freq",
+            "RST→", "←RST", "Name", "QTH", "Grid", "Contest", "Comment"
+        });
+        m_table->horizontalHeader()->setStretchLastSection(true);
+        connect(m_table, &QTableWidget::doubleClicked, this, &MainWindow::onEditQso);
+        main->addWidget(m_table, 1);
+    }
+
+    // ── Action row ─────────────────────────────────────────────────────
+    {
+        auto* row = new QHBoxLayout;
+        row->setSpacing(6);
+        m_countLabel = new QLabel("0 QSOs");
+        m_newBtn    = new QPushButton("New QSO…");
+        m_editBtn   = new QPushButton("Edit…");
+        m_deleteBtn = new QPushButton("Delete");
+        connect(m_newBtn,    &QPushButton::clicked, this, &MainWindow::onNewQso);
+        connect(m_editBtn,   &QPushButton::clicked, this, &MainWindow::onEditQso);
+        connect(m_deleteBtn, &QPushButton::clicked, this, &MainWindow::onDeleteQso);
+        row->addWidget(m_countLabel);
+        row->addStretch();
+        row->addWidget(m_newBtn);
+        row->addWidget(m_editBtn);
+        row->addWidget(m_deleteBtn);
+        main->addLayout(row);
+    }
+
+    // ── Status bar ─────────────────────────────────────────────────────
+    m_sbTci = new QLabel("TCI: not connected");
+    m_sbDb  = new QLabel("DB: —");
+    statusBar()->addPermanentWidget(m_sbTci);
+    statusBar()->addPermanentWidget(m_sbDb);
+}
+
+// ── Header / quick-entry refresh ──────────────────────────────────────────
+
+void MainWindow::refreshHeader()
+{
+    const QString call = m_model ? m_model->myCall() : QString{};
+    m_myCallLabel->setText(call.isEmpty() ? "(no call)" : call);
+
+    m_freqLabel->setText(m_curFreqMhz > 0.0
+                         ? QString::number(m_curFreqMhz, 'f', 3) + " MHz"
+                         : "—");
+    m_bandLabel->setText(m_curBand.isEmpty() ? "—" : m_curBand);
+    QString modeText = m_curMode.isEmpty() ? "—" : m_curMode;
+    if (!m_curSubmode.isEmpty()) modeText += "/" + m_curSubmode;
+    m_modeLabel->setText(modeText);
+}
+
+void MainWindow::refreshQuickEntry()
+{
+    refreshDupBadge();
+    m_saveBtn->setEnabled(!m_callEdit->text().trimmed().isEmpty());
+}
+
+void MainWindow::refreshContestUI()
+{
+    if (!m_model) return;
+    const bool on = m_model->contestMode();
+    m_contestFrame->setVisible(on);
+    if (on) {
+        const QString id = m_model->contestId();
+        m_contestIdLabel->setText(id.isEmpty() ? "CONTEST" : id);
+        const int next = m_model->settingValue("CONTEST_STX_NEXT", "1").toInt();
+        m_stxEdit->setText(QString::number(next > 0 ? next : 1));
+    }
+    refreshHeader();
+}
+
+// ── Quick-entry handlers ──────────────────────────────────────────────────
+
+void MainWindow::onCallEdited(const QString& text)
+{
+    const QString upper = text.toUpper();
+    if (upper != text) {
+        const int cursor = m_callEdit->cursorPosition();
+        QSignalBlocker b{m_callEdit};
+        m_callEdit->setText(upper);
+        m_callEdit->setCursorPosition(cursor);
+    }
+    m_saveBtn->setEnabled(!upper.trimmed().isEmpty());
+    refreshDupBadge();
+}
+
+void MainWindow::refreshDupBadge()
+{
+    if (!m_model) return;
+    const QString call = m_callEdit->text().trimmed().toUpper();
+    if (call.isEmpty() || m_curBand.isEmpty() || m_curMode.isEmpty()) {
+        m_dupBadge->setStyleSheet(kDupBadgeIdle);
+        return;
+    }
+    if (m_model->isDuplicate(call, m_curBand, m_curMode)) {
+        m_dupBadge->setStyleSheet(kDupBadgeHit);
+    } else {
+        m_dupBadge->setStyleSheet(kDupBadgeIdle);
+    }
+}
+
+void MainWindow::onSaveQso()
+{
+    if (!m_model) return;
+    const QString call = m_callEdit->text().trimmed().toUpper();
+    if (call.isEmpty()) return;
+
+    Qso q;
+    q.call = call;
+
+    const QDateTime nowUtc = QDateTime::currentDateTimeUtc();
+    q.qsoDate = nowUtc.toString("yyyyMMdd");
+    q.timeOn  = nowUtc.toString("HHmmss");
+    q.band    = m_curBand;
+    q.freq    = m_curFreqMhz;
+    q.mode    = m_curMode;
+    q.submode = m_curSubmode;
+    q.rstSent = m_rstSentEdit->text().trimmed();
+    q.rstRcvd = m_rstRcvdEdit->text().trimmed();
+    q.comment = m_commentEdit->text().trimmed();
+    q.myCall       = m_model->myCall();
+    q.myGridsquare = m_model->myGridsquare();
+    q.myState      = m_model->myState();
+    q.txPwr        = m_model->defaultTxPwr();
+
+    if (m_model->contestMode()) {
+        q.contestId = m_model->contestId();
+        q.stx        = m_stxEdit->text().toInt();
+        q.srx        = m_srxEdit->text().toInt();
+        q.stxString  = m_stxStringEdit->text().trimmed();
+        q.srxString  = m_srxStringEdit->text().trimmed();
+    }
+
+    if (!m_model->insertQso(q)) {
+        QMessageBox::critical(this, "Save failed", m_model->errorString());
+        return;
+    }
+
+    m_callEdit->clear();
+    m_commentEdit->clear();
+    m_srxEdit->clear();
+    m_srxStringEdit->clear();
+    if (m_model->contestMode()) {
+        const int next = m_stxEdit->text().toInt() + 1;
+        m_stxEdit->setText(QString::number(next));
+        m_model->setSetting("CONTEST_STX_NEXT", QString::number(next));
+    }
+    m_saveBtn->setEnabled(false);
+    refreshDupBadge();
+    m_callEdit->setFocus();
+}
+
+// ── Filter / table ───────────────────────────────────────────────────────
+
+void MainWindow::onFilterChanged() { refreshTable(); }
+
+void MainWindow::onResetFilter()
+{
+    if (m_filterText)    m_filterText->clear();
+    if (m_filterBand)    m_filterBand->setCurrentIndex(0);
+    if (m_filterMode)    m_filterMode->setCurrentIndex(0);
+    if (m_filterContest) m_filterContest->setCurrentIndex(0);
+    refreshTable();
+}
+
+void MainWindow::onLogbookChanged()
+{
+    refreshTable();
+    populateBandFilter();
+    populateModeFilter();
+    populateContestFilter();
+    refreshDupBadge();
+}
+
+void MainWindow::onContextSettingsChanged()
+{
+    refreshHeader();
+    refreshContestUI();
+    refreshStatusBar();
+}
+
+void MainWindow::populateBandFilter()
+{
+    if (!m_model) return;
+    QSet<QString> bands;
+    for (const auto& q : m_model->queryQsos()) if (!q.band.isEmpty()) bands.insert(q.band);
+    QSignalBlocker b{m_filterBand};
+    m_filterBand->clear();
+    m_filterBand->addItem("(any band)", "");
+    QStringList sorted(bands.begin(), bands.end());
+    sorted.sort();
+    for (const auto& v : sorted) m_filterBand->addItem(v, v);
+}
+
+void MainWindow::populateModeFilter()
+{
+    if (!m_model) return;
+    QSet<QString> modes;
+    for (const auto& q : m_model->queryQsos()) if (!q.mode.isEmpty()) modes.insert(q.mode);
+    QSignalBlocker b{m_filterMode};
+    m_filterMode->clear();
+    m_filterMode->addItem("(any mode)", "");
+    QStringList sorted(modes.begin(), modes.end());
+    sorted.sort();
+    for (const auto& v : sorted) m_filterMode->addItem(v, v);
+}
+
+void MainWindow::populateContestFilter()
+{
+    if (!m_model) return;
+    QSet<QString> contests;
+    for (const auto& q : m_model->queryQsos()) if (!q.contestId.isEmpty()) contests.insert(q.contestId);
+    QSignalBlocker b{m_filterContest};
+    m_filterContest->clear();
+    m_filterContest->addItem("(any)", "");
+    m_filterContest->addItem("non-contest only", "<NONE>");
+    QStringList sorted(contests.begin(), contests.end());
+    sorted.sort();
+    for (const auto& v : sorted) m_filterContest->addItem(v, v);
+}
+
+void MainWindow::refreshTable()
+{
+    if (!m_model || !m_table) return;
+    LogbookModel::QueryFilter f;
+    f.text      = m_filterText    ? m_filterText->text().trimmed() : QString{};
+    f.band      = m_filterBand    ? m_filterBand->currentData().toString()    : QString{};
+    f.mode      = m_filterMode    ? m_filterMode->currentData().toString()    : QString{};
+    f.contestId = m_filterContest ? m_filterContest->currentData().toString() : QString{};
+
+    const QVector<Qso> rows = m_model->queryQsos(f);
+    m_table->setRowCount(rows.size());
+
+    auto fmtDate = [](const QString& d) -> QString {
+        if (d.size() == 8) return d.left(4) + "-" + d.mid(4, 2) + "-" + d.mid(6, 2);
+        return d;
+    };
+    auto fmtTime = [](const QString& t) -> QString {
+        if (t.size() >= 4) return t.left(2) + ":" + t.mid(2, 2);
+        return t;
+    };
+
+    for (int i = 0; i < rows.size(); ++i) {
+        const Qso& q = rows[i];
+        auto setItem = [&](int col, const QString& text) {
+            auto* it = new QTableWidgetItem(text);
+            it->setData(Qt::UserRole, QVariant::fromValue<qint64>(q.id));
+            m_table->setItem(i, col, it);
+        };
+        setItem(0,  fmtDate(q.qsoDate));
+        setItem(1,  fmtTime(q.timeOn));
+        setItem(2,  q.call);
+        setItem(3,  q.band);
+        setItem(4,  q.submode.isEmpty() ? q.mode : q.mode + "/" + q.submode);
+        setItem(5,  q.freq > 0.0 ? QString::number(q.freq, 'f', 3) : QString{});
+        setItem(6,  q.rstSent);
+        setItem(7,  q.rstRcvd);
+        setItem(8,  q.name);
+        setItem(9,  q.qth);
+        setItem(10, q.gridsquare);
+        setItem(11, q.contestId);
+        setItem(12, q.comment);
+    }
+    m_table->resizeColumnsToContents();
+    m_countLabel->setText(QString("%1 QSO%2")
+                              .arg(rows.size())
+                              .arg(rows.size() == 1 ? "" : "s"));
+}
+
+qint64 MainWindow::selectedQsoId() const
+{
+    if (!m_table) return -1;
+    const auto sel = m_table->selectedItems();
+    if (sel.isEmpty()) return -1;
+    auto* it = m_table->item(sel.first()->row(), 0);
+    return it ? it->data(Qt::UserRole).toLongLong() : -1;
+}
+
+// ── Action slots ──────────────────────────────────────────────────────────
+
+void MainWindow::onNewQso()
+{
+    if (!m_model) return;
+    Qso q;
+    const QDateTime nowUtc = QDateTime::currentDateTimeUtc();
+    q.qsoDate = nowUtc.toString("yyyyMMdd");
+    q.timeOn  = nowUtc.toString("HHmmss");
+    q.band    = m_curBand;
+    q.freq    = m_curFreqMhz;
+    q.mode    = m_curMode;
+    q.submode = m_curSubmode;
+    q.rstSent = "59";
+    q.rstRcvd = "59";
+    q.myCall       = m_model->myCall();
+    q.myGridsquare = m_model->myGridsquare();
+    q.myState      = m_model->myState();
+    q.txPwr        = m_model->defaultTxPwr();
+    EditDialog dlg(m_model, q, this);
+    dlg.exec();
+}
+
+void MainWindow::onEditQso()
+{
+    const qint64 id = selectedQsoId();
+    if (id < 0) return;
+    bool ok = false;
+    Qso q = m_model->getQso(id, &ok);
+    if (!ok) return;
+    EditDialog dlg(m_model, q, this);
+    dlg.exec();
+}
+
+void MainWindow::onDeleteQso()
+{
+    const qint64 id = selectedQsoId();
+    if (id < 0) return;
+    bool ok = false;
+    Qso q = m_model->getQso(id, &ok);
+    if (!ok) return;
+    const auto reply = QMessageBox::question(
+        this, "Delete QSO",
+        QString("Delete QSO with %1 on %2 %3?").arg(q.call, q.qsoDate, q.timeOn));
+    if (reply != QMessageBox::Yes) return;
+    if (!m_model->deleteQso(id)) {
+        QMessageBox::critical(this, "Delete failed", m_model->errorString());
+    }
+}
+
+void MainWindow::onSettings()
+{
+    if (!m_model) return;
+    SettingsDialog dlg(m_model, this);
+    if (dlg.exec() == QDialog::Accepted) {
+        // If TCI host/port changed and we're connected, reconnect to pick
+        // up the new endpoint.
+        if (m_tci->connected()) {
+            m_tci->disconnectFromServer();
+            applyAutoConnectFromSettings();
+        }
+        refreshStatusBar();
+    }
+}
+
+void MainWindow::onExportAdif()
+{
+    if (!m_model) return;
+    const QString stamp = QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmm");
+    const QString defaultName = QString("shacklog-%1.adi").arg(stamp);
+    const QString path = askSavePath(this, "Export ADIF",
+                                     "ADIF files (*.adi);;All files (*)",
+                                     defaultName);
+    if (path.isEmpty()) return;
+
+    LogbookModel::QueryFilter f;
+    f.text      = m_filterText    ? m_filterText->text().trimmed() : QString{};
+    f.band      = m_filterBand    ? m_filterBand->currentData().toString()    : QString{};
+    f.mode      = m_filterMode    ? m_filterMode->currentData().toString()    : QString{};
+    f.contestId = m_filterContest ? m_filterContest->currentData().toString() : QString{};
+
+    const int n = m_model->exportAdif(path, f);
+    if (n < 0)
+        QMessageBox::critical(this, "Export failed", m_model->errorString());
+    else
+        QMessageBox::information(this, "Export complete",
+                                 QString("Wrote %1 QSO%2 to %3.")
+                                     .arg(n).arg(n == 1 ? "" : "s").arg(path));
+}
+
+void MainWindow::onExportCabrillo()
+{
+    if (!m_model) return;
+    QString contestId = m_filterContest ? m_filterContest->currentData().toString() : QString{};
+    if (contestId.isEmpty() || contestId == "<NONE>") contestId = m_model->contestId();
+    if (contestId.isEmpty()) {
+        QMessageBox::warning(this, "Cabrillo export",
+                             "Pick a contest in the filter dropdown or set CONTEST_ID "
+                             "in Settings before exporting Cabrillo.");
+        return;
+    }
+    const QString stamp = QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmm");
+    const QString defaultName = QString("%1-%2.cbr").arg(contestId.toLower()).arg(stamp);
+    const QString path = askSavePath(this, "Export Cabrillo",
+                                     "Cabrillo files (*.cbr *.log);;All files (*)",
+                                     defaultName);
+    if (path.isEmpty()) return;
+    const int n = m_model->exportCabrillo(path, contestId);
+    if (n < 0)
+        QMessageBox::critical(this, "Export failed", m_model->errorString());
+    else
+        QMessageBox::information(this, "Export complete",
+                                 QString("Wrote %1 QSO%2 to %3.")
+                                     .arg(n).arg(n == 1 ? "" : "s").arg(path));
+}
+
+void MainWindow::onAbout()
+{
+    QMessageBox::about(this, "About ShackLog",
+        "<h3>ShackLog</h3>"
+        "<p>Standalone ham radio logbook with TCI integration.</p>"
+        "<p>Live freq / mode from any TCI server (AetherSDR, ExpertSDR2, "
+        "SunSDR). ADIF and Cabrillo export.</p>"
+        "<p>73 de G0JKN / W3.</p>");
+}
+
+// ── TCI ───────────────────────────────────────────────────────────────────
+
+void MainWindow::applyAutoConnectFromSettings()
+{
+    if (!m_model) return;
+    const bool autoConnect = m_model->settingValue("TCI_AUTOCONNECT", "1") == "1";
+    if (!autoConnect) return;
+    onConnectTci();
+}
+
+void MainWindow::onConnectTci()
+{
+    if (!m_model) return;
+    const QString host = m_model->settingValue("TCI_HOST", "127.0.0.1");
+    const quint16 port = static_cast<quint16>(m_model->settingValue("TCI_PORT", "40001").toUInt());
+    m_tci->connectToServer(host, port);
+    statusBar()->showMessage(QString("Connecting to %1:%2…").arg(host).arg(port), 3000);
+}
+
+void MainWindow::onDisconnectTci()
+{
+    m_tci->disconnectFromServer();
+}
+
+void MainWindow::onTciConnectionChanged(bool connected)
+{
+    m_tciDot->setStyleSheet(connected ? kTciDotConnected : kTciDotDisconnected);
+    m_tciStatus->setText(connected ? "TCI live" : "TCI offline");
+    refreshStatusBar();
+    if (!connected) {
+        // Don't clear cached freq/mode — keep them so a brief disconnect
+        // doesn't wipe the auto-fill mid-QSO.
+    }
+}
+
+void MainWindow::onTciFrequencyChanged(double mhz)
+{
+    m_curFreqMhz = mhz;
+    m_curBand    = LogbookModel::bandFromFreqMhz(mhz);
+    refreshHeader();
+    refreshDupBadge();
+}
+
+void MainWindow::onTciModeChanged(const QString& mode)
+{
+    m_rawTciMode = mode;
+    QString adifMode, adifSub;
+    LogbookModel::adifModeFromTciMode(mode, &adifMode, &adifSub);
+    m_curMode    = adifMode;
+    m_curSubmode = adifSub;
+
+    // Default RST per-mode: 599 for CW/RTTY, 59 otherwise.  Only flip if
+    // the user hasn't customised the value.
+    const QString defaultRst = (m_curMode == "CW" || m_curMode == "RTTY")
+                                 ? "599" : "59";
+    if (m_rstSentEdit->text() == "59" || m_rstSentEdit->text() == "599")
+        m_rstSentEdit->setText(defaultRst);
+    if (m_rstRcvdEdit->text() == "59" || m_rstRcvdEdit->text() == "599")
+        m_rstRcvdEdit->setText(defaultRst);
+
+    refreshHeader();
+    refreshDupBadge();
+}
+
+// ── Status bar ───────────────────────────────────────────────────────────
+
+void MainWindow::refreshStatusBar()
+{
+    if (!m_model) return;
+    const QString host = m_model->settingValue("TCI_HOST", "127.0.0.1");
+    const QString port = m_model->settingValue("TCI_PORT", "40001");
+    m_sbTci->setText(QString("TCI: %1 %2:%3")
+                         .arg(m_tci->connected() ? "✓" : "✗")
+                         .arg(host).arg(port));
+    m_sbDb->setText(QString("DB: %1").arg(m_model->databasePath()));
+}
+
+} // namespace ShackLog

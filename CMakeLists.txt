@@ -1,0 +1,80 @@
+cmake_minimum_required(VERSION 3.20)
+project(ShackLog
+    VERSION 0.1.0
+    DESCRIPTION "Standalone ham radio logbook with TCI integration"
+    LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
+set(CMAKE_AUTOUIC ON)
+
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
+endif()
+
+# Qt 6.2+ for QSqlDatabase, QWebSocket, modern QString APIs
+find_package(Qt6 6.2 REQUIRED COMPONENTS
+    Core
+    Gui
+    Widgets
+    Sql
+    WebSockets
+)
+
+# Source layout — keep flat under src/ so includes are simple.
+set(SHACKLOG_SOURCES
+    src/main.cpp
+    src/MainWindow.cpp
+    src/MainWindow.h
+    src/TciClient.cpp
+    src/TciClient.h
+    src/LogbookModel.cpp
+    src/LogbookModel.h
+    src/Qso.h
+    src/EditDialog.cpp
+    src/EditDialog.h
+    src/SettingsDialog.cpp
+    src/SettingsDialog.h
+)
+
+# Windows: link as a GUI app so no console window appears at launch.
+if(WIN32)
+    add_executable(ShackLog WIN32 ${SHACKLOG_SOURCES})
+elseif(APPLE)
+    add_executable(ShackLog MACOSX_BUNDLE ${SHACKLOG_SOURCES})
+else()
+    add_executable(ShackLog ${SHACKLOG_SOURCES})
+endif()
+
+target_include_directories(ShackLog PRIVATE src)
+
+target_link_libraries(ShackLog PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::Sql
+    Qt6::WebSockets
+)
+
+# Keep MSVC quiet about Qt's deprecated-but-not-fatal API surface, and
+# enable common warnings.
+if(MSVC)
+    target_compile_options(ShackLog PRIVATE /W3 /permissive-)
+    target_compile_definitions(ShackLog PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+else()
+    target_compile_options(ShackLog PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# On macOS the app needs a sensible bundle identifier.
+if(APPLE)
+    set_target_properties(ShackLog PROPERTIES
+        MACOSX_BUNDLE_BUNDLE_NAME           "ShackLog"
+        MACOSX_BUNDLE_GUI_IDENTIFIER        "com.g0jkn.shacklog"
+        MACOSX_BUNDLE_BUNDLE_VERSION        "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING  "${PROJECT_VERSION}"
+    )
+endif()
