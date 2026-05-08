@@ -54,8 +54,8 @@ public:
         QString dateTo;
         int     limit{0};
     };
-    QVector<Qso> queryQsos(const QueryFilter& filter = {}) const;
-    int          countQsos(const QueryFilter& filter = {}) const;
+    QVector<Qso> queryQsos(const QueryFilter& filter = QueryFilter()) const;
+    int          countQsos(const QueryFilter& filter = QueryFilter()) const;
 
     bool isDuplicate(const QString& call,
                      const QString& band,
@@ -74,10 +74,10 @@ public:
     QString contestId() const         { return settingValue("CONTEST_ID"); }
 
     // ── Export ────────────────────────────────────────────────────────
-    int exportAdif(const QString& filePath, const QueryFilter& filter = {}) const;
+    int exportAdif(const QString& filePath, const QueryFilter& filter = QueryFilter()) const;
     int exportCabrillo(const QString& filePath,
                        const QString& contestId,
-                       const QueryFilter& filter = {}) const;
+                       const QueryFilter& filter = QueryFilter()) const;
 
     // ── Static helpers ────────────────────────────────────────────────
     // Map a frequency in MHz to an ADIF band string ("20m", "70cm", ...).
