@@ -157,7 +157,7 @@ jobs:
           chmod +x linuxdeploy*.AppImage
 
           # Tell linuxdeploy-plugin-qt where Qt's qmake lives.
-          export QMAKE="$Qt6_DIR/bin/qmake"
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
 
           ./linuxdeploy-x86_64.AppImage \
               --appdir AppDir \
@@ -204,7 +204,7 @@ jobs:
       - name: macdeployqt + DMG
         run: |
           # Bundle Qt frameworks into the .app
-          "$Qt6_DIR/bin/macdeployqt" build/ShackLog.app
+          "$QT_ROOT_DIR/bin/macdeployqt" build/ShackLog.app
 
           version="${GITHUB_REF_NAME:-dev-${GITHUB_SHA:0:7}}"
           dmg_name="ShackLog-${version}-macos-arm64.dmg"
