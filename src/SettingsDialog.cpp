@@ -1,8 +1,10 @@
 #include "SettingsDialog.h"
 
 #include "LogbookModel.h"
+#include "AetherSettingsReader.h"
 
 #include <QComboBox>
+#include <QLabel>
 #include <QLineEdit>
 #include <QSpinBox>
 #include <QDoubleSpinBox>
@@ -83,6 +85,41 @@ void SettingsDialog::buildUI()
     tciL->addRow(m_tciAutoConnect);
     tabs->addTab(tci, "TCI");
 
+    // ── DX Cluster ──────────────────────────────────────────────────────
+    auto* dxc = new QWidget;
+    auto* dxcL = new QFormLayout(dxc);
+    m_dxcEnable     = new QCheckBox("Enable DX cluster spotting (auto-fill CALL on QSY)");
+    m_dxcAutoDetect = new QCheckBox("Auto-detect cluster from AetherSDR's settings file");
+    m_dxcHost       = new QLineEdit;
+    m_dxcHost->setPlaceholderText("dxc.nc7j.com");
+    m_dxcPort       = new QSpinBox;
+    m_dxcPort->setRange(1, 65535);
+    m_dxcPort->setValue(7300);
+    m_dxcCallsign   = new QLineEdit;
+    m_dxcCallsign->setPlaceholderText("G0JKN  (\"-L\" suffix is appended at login)");
+    m_dxcDetected   = new QLabel("(no AetherSDR config detected)");
+    m_dxcDetected->setStyleSheet("QLabel { color: #6b8099; font-size: 10px; }");
+    m_dxcDetected->setWordWrap(true);
+
+    dxcL->addRow(m_dxcEnable);
+    dxcL->addRow(m_dxcAutoDetect);
+    dxcL->addRow("Detected", m_dxcDetected);
+    dxcL->addRow("Host (override)",     m_dxcHost);
+    dxcL->addRow("Port (override)",     m_dxcPort);
+    dxcL->addRow("Callsign (override)", m_dxcCallsign);
+
+    auto refreshDxcEditable = [this]() {
+        const bool manual = !m_dxcAutoDetect->isChecked();
+        m_dxcHost->setEnabled(manual);
+        m_dxcPort->setEnabled(manual);
+        m_dxcCallsign->setEnabled(manual);
+    };
+    connect(m_dxcAutoDetect, &QCheckBox::toggled, this, [refreshDxcEditable](bool){
+        refreshDxcEditable();
+    });
+
+    tabs->addTab(dxc, "DX Cluster");
+
     // ── Contest ─────────────────────────────────────────────────────────
     auto* ctst = new QWidget;
     auto* ctstL = new QFormLayout(ctst);
@@ -150,6 +187,31 @@ void SettingsDialog::populate()
     m_tciPort->setValue(m_model->settingValue("TCI_PORT", "40001").toInt());
     m_tciAutoConnect->setChecked(m_model->settingValue("TCI_AUTOCONNECT", "1") == "1");
 
+    // DX Cluster — auto-detect from AetherSDR's config, default to "on" if
+    // a cluster is configured there; otherwise off until the user opts in.
+    const auto aether = AetherSettingsReader::readDxClusterConfig();
+    if (aether.found) {
+        m_dxcDetected->setText(
+            QString("AetherSDR: %1:%2 as %3 (login will be sent as %3-L)")
+                .arg(aether.host).arg(aether.port).arg(aether.callsign));
+    } else {
+        m_dxcDetected->setText(
+            "(AetherSDR config not found at " + AetherSettingsReader::defaultSettingsPath()
+            + " — uncheck auto-detect to enter cluster details manually)");
+    }
+    const QString defEnable = aether.found ? "1" : "0";
+    m_dxcEnable->setChecked(m_model->settingValue("DXC_ENABLE", defEnable) == "1");
+    m_dxcAutoDetect->setChecked(m_model->settingValue("DXC_AUTODETECT", "1") == "1");
+    m_dxcHost->setText(m_model->settingValue("DXC_HOST",
+                            aether.found ? aether.host : QString("dxc.nc7j.com")));
+    m_dxcPort->setValue(m_model->settingValue("DXC_PORT",
+                            QString::number(aether.found ? aether.port : 7300)).toInt());
+    m_dxcCallsign->setText(m_model->settingValue("DXC_CALLSIGN", aether.callsign));
+    const bool manual = !m_dxcAutoDetect->isChecked();
+    m_dxcHost->setEnabled(manual);
+    m_dxcPort->setEnabled(manual);
+    m_dxcCallsign->setEnabled(manual);
+
     m_contestMode->setChecked(m_model->contestMode());
     const QString cid = m_model->contestId();
     int idx = m_contestId->findText(cid);
@@ -188,6 +250,12 @@ void SettingsDialog::onAccept()
                                               : m_tciHost->text().trimmed());
     m_model->setSetting("TCI_PORT",         QString::number(m_tciPort->value()));
     m_model->setSetting("TCI_AUTOCONNECT",  m_tciAutoConnect->isChecked() ? "1" : "0");
+
+    m_model->setSetting("DXC_ENABLE",       m_dxcEnable->isChecked() ? "1" : "0");
+    m_model->setSetting("DXC_AUTODETECT",   m_dxcAutoDetect->isChecked() ? "1" : "0");
+    m_model->setSetting("DXC_HOST",         m_dxcHost->text().trimmed());
+    m_model->setSetting("DXC_PORT",         QString::number(m_dxcPort->value()));
+    m_model->setSetting("DXC_CALLSIGN",     m_dxcCallsign->text().trimmed().toUpper());
 
     m_model->setSetting("CONTEST_MODE",     m_contestMode->isChecked() ? "1" : "0");
     m_model->setSetting("CONTEST_ID",       m_contestId->currentText().trimmed().toUpper());

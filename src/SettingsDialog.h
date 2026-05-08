@@ -13,6 +13,7 @@
 #include <QDialog>
 
 class QComboBox;
+class QLabel;
 class QLineEdit;
 class QSpinBox;
 class QDoubleSpinBox;
@@ -47,6 +48,14 @@ private:
     QLineEdit*  m_tciHost{};
     QSpinBox*   m_tciPort{};
     QCheckBox*  m_tciAutoConnect{};
+
+    // DX Cluster
+    QCheckBox*  m_dxcEnable{};
+    QCheckBox*  m_dxcAutoDetect{};
+    QLineEdit*  m_dxcHost{};
+    QSpinBox*   m_dxcPort{};
+    QLineEdit*  m_dxcCallsign{};
+    QLabel*     m_dxcDetected{};
 
     // Contest
     QCheckBox*  m_contestMode{};

@@ -4,6 +4,11 @@
 #include "TciClient.h"
 #include "EditDialog.h"
 #include "SettingsDialog.h"
+#include "SpotIndex.h"
+#include "DxClusterClient.h"
+#include "AetherSettingsReader.h"
+
+#include <QTimer>
 
 #include <QAction>
 #include <QApplication>
@@ -93,7 +98,10 @@ QString askSavePath(QWidget* parent, const QString& title, const QString& filter
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent),
       m_model(new LogbookModel(this)),
-      m_tci(new TciClient(this))
+      m_tci(new TciClient(this)),
+      m_spotIndex(new SpotIndex(this)),
+      m_dxc(new DxClusterClient(this)),
+      m_spotPurgeTimer(new QTimer(this))
 {
     setWindowTitle("ShackLog");
     resize(1200, 700);
@@ -117,6 +125,17 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_tci, &TciClient::frequencyChanged,  this, &MainWindow::onTciFrequencyChanged);
     connect(m_tci, &TciClient::modeChanged,       this, &MainWindow::onTciModeChanged);
 
+    connect(m_dxc, &DxClusterClient::connectionChanged,
+            this, &MainWindow::onClusterConnectionChanged);
+    connect(m_dxc, &DxClusterClient::spotReceived,
+            this, &MainWindow::onClusterSpotReceived);
+
+    // Drop any spot older than its lifetime once a minute so the index
+    // doesn't grow without bound during a long session.
+    m_spotPurgeTimer->setInterval(60 * 1000);
+    connect(m_spotPurgeTimer, &QTimer::timeout, this, &MainWindow::purgeStaleSpots);
+    m_spotPurgeTimer->start();
+
     refreshHeader();
     refreshContestUI();
     refreshTable();
@@ -126,6 +145,7 @@ MainWindow::MainWindow(QWidget* parent)
     refreshStatusBar();
 
     applyAutoConnectFromSettings();
+    applyClusterConfigFromSettings();
 }
 
 MainWindow::~MainWindow() = default;
@@ -410,8 +430,10 @@ void MainWindow::buildUI()
 
     // ── Status bar ─────────────────────────────────────────────────────
     m_sbTci = new QLabel("TCI: not connected");
+    m_sbDxc = new QLabel("DXC: off");
     m_sbDb  = new QLabel("DB: —");
     statusBar()->addPermanentWidget(m_sbTci);
+    statusBar()->addPermanentWidget(m_sbDxc);
     statusBar()->addPermanentWidget(m_sbDb);
 }
 
@@ -719,6 +741,9 @@ void MainWindow::onSettings()
             m_tci->disconnectFromServer();
             applyAutoConnectFromSettings();
         }
+        // Cluster config may have changed too — reapply unconditionally
+        // (no-op if nothing changed; enables/disables/reconnects otherwise).
+        applyClusterConfigFromSettings();
         refreshStatusBar();
     }
 }
@@ -825,6 +850,7 @@ void MainWindow::onTciFrequencyChanged(double mhz)
     m_curBand    = LogbookModel::bandFromFreqMhz(mhz);
     refreshHeader();
     refreshDupBadge();
+    tryAutofillFromSpot();
 }
 
 void MainWindow::onTciModeChanged(const QString& mode)
@@ -846,6 +872,98 @@ void MainWindow::onTciModeChanged(const QString& mode)
 
     refreshHeader();
     refreshDupBadge();
+    tryAutofillFromSpot();
+}
+
+// ── Spot autofill (Phase 2) ──────────────────────────────────────────────
+
+void MainWindow::tryAutofillFromSpot()
+{
+    if (!m_spotIndex || !m_callEdit) return;
+    // Don't overwrite the operator's typing.  Once they've started a
+    // call, stay out of their way until they save (which clears the
+    // field) or manually delete it.
+    if (!m_callEdit->text().trimmed().isEmpty()) return;
+    if (m_curFreqMhz <= 0.0 || m_curMode.isEmpty()) return;
+
+    auto hit = m_spotIndex->findAt(m_curFreqMhz, m_curMode);
+    if (!hit) return;
+
+    m_callEdit->setText(hit->call);
+    m_saveBtn->setEnabled(true);
+    refreshDupBadge();
+
+    // Drop the spot's comment into the COMMENT/EXCH field IF the operator
+    // hasn't put anything there yet.  Useful for POTA park refs and
+    // cluster notes.
+    if (m_commentEdit && m_commentEdit->text().trimmed().isEmpty() &&
+        !hit->comment.isEmpty()) {
+        m_commentEdit->setText(hit->comment);
+    }
+    statusBar()->showMessage(
+        QString("Auto-filled from %1 (%2)").arg(hit->source, hit->call), 3500);
+}
+
+void MainWindow::onClusterConnectionChanged(bool connected)
+{
+    Q_UNUSED(connected);
+    refreshStatusBar();
+}
+
+void MainWindow::onClusterSpotReceived(const SpotData& spot)
+{
+    if (!m_spotIndex) return;
+    m_spotIndex->addOrUpdate(spot);
+    refreshStatusBar();
+}
+
+void MainWindow::purgeStaleSpots()
+{
+    if (m_spotIndex) m_spotIndex->purgeExpired();
+    refreshStatusBar();
+}
+
+void MainWindow::applyClusterConfigFromSettings()
+{
+    if (!m_model || !m_dxc) return;
+
+    // Default DXC_ENABLE to "1" if AetherSDR has a usable cluster config,
+    // else "0" — first-run UX picks up the operator's existing setup
+    // without prompting.
+    const auto aether = AetherSettingsReader::readDxClusterConfig();
+    const QString defEnable = aether.found ? "1" : "0";
+    const bool enable = m_model->settingValue("DXC_ENABLE", defEnable) == "1";
+
+    if (!enable) {
+        m_dxc->disconnectFromCluster();
+        refreshStatusBar();
+        return;
+    }
+
+    const bool autoDetect = m_model->settingValue("DXC_AUTODETECT", "1") == "1";
+    QString host;
+    int port = 0;
+    QString call;
+    if (autoDetect && aether.found) {
+        host = aether.host;
+        port = aether.port;
+        call = aether.callsign;
+    } else {
+        host = m_model->settingValue("DXC_HOST");
+        port = m_model->settingValue("DXC_PORT").toInt();
+        call = m_model->settingValue("DXC_CALLSIGN");
+    }
+    // Fall back to the operator's main MY_CALL setting if nothing else
+    // was found — beats refusing to connect.
+    if (call.isEmpty()) call = m_model->myCall();
+
+    if (host.isEmpty() || port <= 0 || call.isEmpty()) {
+        m_dxc->disconnectFromCluster();
+        refreshStatusBar();
+        return;
+    }
+    m_dxc->connectToCluster(host, static_cast<quint16>(port), call);
+    refreshStatusBar();
 }
 
 // ── Status bar ───────────────────────────────────────────────────────────
@@ -858,6 +976,17 @@ void MainWindow::refreshStatusBar()
     m_sbTci->setText(QString("TCI: %1 %2:%3")
                          .arg(m_tci->connected() ? "✓" : "✗")
                          .arg(host).arg(port));
+
+    if (m_dxc && m_sbDxc) {
+        const bool dxcEnabled = m_model->settingValue("DXC_ENABLE", "0") == "1";
+        if (!dxcEnabled) {
+            m_sbDxc->setText("DXC: off");
+        } else {
+            const QString status = m_dxc->connected() ? "✓" : "…";
+            m_sbDxc->setText(QString("DXC: %1 %2 spots").arg(status)
+                                .arg(m_spotIndex ? m_spotIndex->size() : 0));
+        }
+    }
     m_sbDb->setText(QString("DB: %1").arg(m_model->databasePath()));
 }
 

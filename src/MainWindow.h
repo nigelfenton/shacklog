@@ -23,11 +23,15 @@ class QLabel;
 class QLineEdit;
 class QPushButton;
 class QTableWidget;
+class QTimer;
 
 namespace ShackLog {
 
 class LogbookModel;
 class TciClient;
+class SpotIndex;
+class DxClusterClient;
+struct SpotData;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -62,6 +66,11 @@ private slots:
     void onTciFrequencyChanged(double mhz);
     void onTciModeChanged(const QString& mode);
 
+    // DX cluster (Phase 2)
+    void onClusterConnectionChanged(bool connected);
+    void onClusterSpotReceived(const ShackLog::SpotData& spot);
+    void purgeStaleSpots();
+
 private:
     void buildUI();
     void buildMenus();
@@ -75,10 +84,15 @@ private:
     void refreshDupBadge();
     void refreshStatusBar();
     void applyAutoConnectFromSettings();
+    void applyClusterConfigFromSettings();
+    void tryAutofillFromSpot();
     qint64 selectedQsoId() const;
 
-    LogbookModel* m_model{nullptr};
-    TciClient*    m_tci{nullptr};
+    LogbookModel*    m_model{nullptr};
+    TciClient*       m_tci{nullptr};
+    SpotIndex*       m_spotIndex{nullptr};
+    DxClusterClient* m_dxc{nullptr};
+    QTimer*          m_spotPurgeTimer{nullptr};
 
     // Cached TCI state
     double  m_curFreqMhz{0.0};
@@ -127,6 +141,7 @@ private:
 
     // Status bar permanent widgets
     QLabel* m_sbTci{};
+    QLabel* m_sbDxc{};
     QLabel* m_sbDb{};
 
     // Menu actions

@@ -39,6 +39,14 @@ set(SHACKLOG_SOURCES
     src/EditDialog.h
     src/SettingsDialog.cpp
     src/SettingsDialog.h
+    # ── Spot autofill (Phase 2: DX cluster, Phase 3: POTA) ──
+    src/SpotData.h
+    src/SpotIndex.cpp
+    src/SpotIndex.h
+    src/AetherSettingsReader.cpp
+    src/AetherSettingsReader.h
+    src/DxClusterClient.cpp
+    src/DxClusterClient.h
 )
 
 # Windows: link as a GUI app so no console window appears at launch.
