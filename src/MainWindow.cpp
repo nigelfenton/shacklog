@@ -176,11 +176,17 @@ void MainWindow::buildUI()
         m_myCallLabel = new QLabel("(no call)");
         m_myCallLabel->setStyleSheet(kHeaderCallStyle);
 
+        // Fixed minimum widths so labels don't resize as content changes.
+        // Without these the freq label grows by ~10 px when going from
+        // "14.250 MHz" to "144.250 MHz" and the whole row shifts left/right.
+        // Right-aligned within their fixed box for numeric stability.
         auto* freqBlock = new QVBoxLayout;
         freqBlock->setSpacing(0);
         auto* fL = new QLabel("FREQ"); fL->setStyleSheet(kHeaderLabelStyle);
         m_freqLabel = new QLabel("—");
         m_freqLabel->setStyleSheet(kHeaderValueStyle);
+        m_freqLabel->setMinimumWidth(120);
+        m_freqLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
         freqBlock->addWidget(fL); freqBlock->addWidget(m_freqLabel);
 
         auto* bandBlock = new QVBoxLayout;
@@ -188,6 +194,7 @@ void MainWindow::buildUI()
         auto* bL = new QLabel("BAND"); bL->setStyleSheet(kHeaderLabelStyle);
         m_bandLabel = new QLabel("—");
         m_bandLabel->setStyleSheet(kHeaderValueStyle);
+        m_bandLabel->setMinimumWidth(60);
         bandBlock->addWidget(bL); bandBlock->addWidget(m_bandLabel);
 
         auto* modeBlock = new QVBoxLayout;
@@ -195,12 +202,17 @@ void MainWindow::buildUI()
         auto* mL = new QLabel("MODE"); mL->setStyleSheet(kHeaderLabelStyle);
         m_modeLabel = new QLabel("—");
         m_modeLabel->setStyleSheet(kHeaderValueStyle);
+        m_modeLabel->setMinimumWidth(90);
         modeBlock->addWidget(mL); modeBlock->addWidget(m_modeLabel);
 
         m_tciDot    = new QLabel("●");
         m_tciDot->setStyleSheet(kTciDotDisconnected);
         m_tciStatus = new QLabel("TCI offline");
         m_tciStatus->setStyleSheet(kHeaderLabelStyle);
+        // "TCI offline" is wider than "TCI live" — pin the width so the
+        // dot doesn't slide left when we go online.
+        m_tciStatus->setMinimumWidth(70);
+        m_tciStatus->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
 
         row->addWidget(m_myCallLabel);
         row->addSpacing(20);
