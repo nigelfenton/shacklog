@@ -69,6 +69,35 @@ else()
     target_compile_options(ShackLog PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+# Windows: run windeployqt after every build so Qt's DLLs and the
+# platforms\qwindows.dll plugin get copied next to ShackLog.exe.  This
+# lets the binary launch by double-click without Qt on PATH.
+#
+# We locate windeployqt via the bin/ directory next to the qmake we used,
+# which gives a portable path regardless of how Qt was found.
+if(WIN32)
+    get_target_property(_qt6_qmake Qt6::qmake IMPORTED_LOCATION)
+    get_filename_component(_qt6_bin "${_qt6_qmake}" DIRECTORY)
+    find_program(WINDEPLOYQT_EXE windeployqt HINTS "${_qt6_bin}")
+    if(WINDEPLOYQT_EXE)
+        add_custom_command(TARGET ShackLog POST_BUILD
+            COMMAND "${WINDEPLOYQT_EXE}"
+                    $<IF:$<CONFIG:Debug>,--debug,--release>
+                    --no-translations
+                    --no-system-d3d-compiler
+                    --no-opengl-sw
+                    --no-quick-import
+                    --compiler-runtime
+                    "$<TARGET_FILE:ShackLog>"
+            COMMENT "Running windeployqt to bundle Qt runtime DLLs"
+            VERBATIM
+        )
+    else()
+        message(WARNING "windeployqt not found in ${_qt6_bin} — "
+                        "ShackLog.exe will need Qt DLLs on PATH to launch")
+    endif()
+endif()
+
 # On macOS the app needs a sensible bundle identifier.
 if(APPLE)
     set_target_properties(ShackLog PROPERTIES
