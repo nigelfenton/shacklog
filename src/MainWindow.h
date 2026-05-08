@@ -21,6 +21,7 @@ class QComboBox;
 class QFrame;
 class QLabel;
 class QLineEdit;
+class QPlainTextEdit;
 class QPushButton;
 class QTableWidget;
 class QTimer;
@@ -69,7 +70,9 @@ private slots:
     // DX cluster (Phase 2)
     void onClusterConnectionChanged(bool connected);
     void onClusterSpotReceived(const ShackLog::SpotData& spot);
+    void onClusterRawLine(const QString& line);
     void purgeStaleSpots();
+    void onShowClusterLog();
 
 private:
     void buildUI();
@@ -93,6 +96,7 @@ private:
     SpotIndex*       m_spotIndex{nullptr};
     DxClusterClient* m_dxc{nullptr};
     QTimer*          m_spotPurgeTimer{nullptr};
+    QPlainTextEdit*  m_dxcLog{nullptr};   // diagnostic — see onShowClusterLog()
 
     // Cached TCI state
     double  m_curFreqMhz{0.0};
@@ -150,6 +154,7 @@ private:
     QAction* m_actSettings{};
     QAction* m_actConnectTci{};
     QAction* m_actDisconnectTci{};
+    QAction* m_actDxcLog{};
     QAction* m_actNew{};
     QAction* m_actEdit{};
     QAction* m_actDelete{};

@@ -8,6 +8,9 @@
 #include "DxClusterClient.h"
 #include "AetherSettingsReader.h"
 
+#include <QDialog>
+#include <QPlainTextEdit>
+#include <QTextCursor>
 #include <QTimer>
 
 #include <QAction>
@@ -129,6 +132,34 @@ MainWindow::MainWindow(QWidget* parent)
             this, &MainWindow::onClusterConnectionChanged);
     connect(m_dxc, &DxClusterClient::spotReceived,
             this, &MainWindow::onClusterSpotReceived);
+    connect(m_dxc, &DxClusterClient::rawLine,
+            this, &MainWindow::onClusterRawLine);
+
+    // Hidden, lazy-shown diagnostic buffer for the cluster traffic.
+    // Populated continuously so it has history when first opened.
+    m_dxcLog = new QPlainTextEdit;
+    m_dxcLog->setReadOnly(true);
+    m_dxcLog->setMaximumBlockCount(20000);
+    m_dxcLog->setStyleSheet(
+        "QPlainTextEdit { background-color: #050a14; color: #dde6f0; "
+        "font-family: Consolas, 'Cascadia Mono', monospace; font-size: 11px; "
+        "border: 1px solid #1c2a40; }");
+    m_dxcLog->setLineWrapMode(QPlainTextEdit::NoWrap);
+
+    // Seed with where we expect to find AetherSDR's settings, so we know
+    // immediately if the path lookup is wrong.
+    const auto detected = AetherSettingsReader::readDxClusterConfig();
+    m_dxcLog->appendPlainText(QString("[boot] AetherSDR settings path: %1")
+                                  .arg(detected.sourcePath));
+    if (detected.found) {
+        m_dxcLog->appendPlainText(QString("[boot] detected %1:%2 as %3 (auto=%4)")
+                                      .arg(detected.host)
+                                      .arg(detected.port)
+                                      .arg(detected.callsign)
+                                      .arg(detected.autoConnect ? "yes" : "no"));
+    } else {
+        m_dxcLog->appendPlainText("[boot] AetherSDR settings file NOT readable / no DxCluster keys");
+    }
 
     // Drop any spot older than its lifetime once a minute so the index
     // doesn't grow without bound during a long session.
@@ -172,6 +203,8 @@ void MainWindow::buildMenus()
     toolsMenu->addSeparator();
     m_actConnectTci    = toolsMenu->addAction("&Connect TCI",    this, &MainWindow::onConnectTci);
     m_actDisconnectTci = toolsMenu->addAction("&Disconnect TCI", this, &MainWindow::onDisconnectTci);
+    toolsMenu->addSeparator();
+    m_actDxcLog        = toolsMenu->addAction("DX Cluster &Log…", this, &MainWindow::onShowClusterLog);
 
     auto* helpMenu = menuBar()->addMenu("&Help");
     m_actAbout = helpMenu->addAction("&About ShackLog", this, &MainWindow::onAbout);
@@ -906,7 +939,11 @@ void MainWindow::tryAutofillFromSpot()
 
 void MainWindow::onClusterConnectionChanged(bool connected)
 {
-    Q_UNUSED(connected);
+    if (m_dxcLog) {
+        m_dxcLog->appendPlainText(QString("[%1] %2")
+                                      .arg(QDateTime::currentDateTime().toString("HH:mm:ss"))
+                                      .arg(connected ? "CONNECTED" : "DISCONNECTED"));
+    }
     refreshStatusBar();
 }
 
@@ -914,7 +951,55 @@ void MainWindow::onClusterSpotReceived(const SpotData& spot)
 {
     if (!m_spotIndex) return;
     m_spotIndex->addOrUpdate(spot);
+    if (m_dxcLog) {
+        m_dxcLog->appendPlainText(QString("[%1] SPOT %2 @ %3 MHz  %4")
+                                      .arg(QDateTime::currentDateTime().toString("HH:mm:ss"))
+                                      .arg(spot.call)
+                                      .arg(spot.freqMhz, 0, 'f', 4)
+                                      .arg(spot.comment));
+    }
     refreshStatusBar();
+}
+
+void MainWindow::onClusterRawLine(const QString& line)
+{
+    if (!m_dxcLog) return;
+    m_dxcLog->appendPlainText(QString("[%1] %2")
+                                  .arg(QDateTime::currentDateTime().toString("HH:mm:ss"))
+                                  .arg(line));
+}
+
+void MainWindow::onShowClusterLog()
+{
+    if (!m_dxcLog) return;
+    auto* dlg = new QDialog(this);
+    dlg->setWindowTitle("DX Cluster Log");
+    dlg->resize(900, 520);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+
+    auto* lay = new QVBoxLayout(dlg);
+    // Re-parent so the log lives in the dialog while it's open;
+    // putting it back to nullptr-parent on close keeps the buffer
+    // alive across opens (history persists).
+    m_dxcLog->setParent(dlg);
+    lay->addWidget(m_dxcLog, 1);
+
+    auto* row = new QHBoxLayout;
+    auto* clearBtn = new QPushButton("Clear");
+    auto* closeBtn = new QPushButton("Close");
+    connect(clearBtn, &QPushButton::clicked, m_dxcLog, &QPlainTextEdit::clear);
+    connect(closeBtn, &QPushButton::clicked, dlg, &QDialog::close);
+    row->addStretch();
+    row->addWidget(clearBtn);
+    row->addWidget(closeBtn);
+    lay->addLayout(row);
+
+    connect(dlg, &QDialog::destroyed, this, [this]() {
+        if (m_dxcLog) m_dxcLog->setParent(nullptr);
+    });
+
+    m_dxcLog->moveCursor(QTextCursor::End);
+    dlg->show();
 }
 
 void MainWindow::purgeStaleSpots()
@@ -958,10 +1043,18 @@ void MainWindow::applyClusterConfigFromSettings()
     if (call.isEmpty()) call = m_model->myCall();
 
     if (host.isEmpty() || port <= 0 || call.isEmpty()) {
+        if (m_dxcLog)
+            m_dxcLog->appendPlainText(
+                QString("[apply] missing host/port/call (host=%1 port=%2 call=%3) — not connecting")
+                    .arg(host).arg(port).arg(call));
         m_dxc->disconnectFromCluster();
         refreshStatusBar();
         return;
     }
+    if (m_dxcLog)
+        m_dxcLog->appendPlainText(
+            QString("[apply] connect %1:%2 as %3-L (auto=%4)")
+                .arg(host).arg(port).arg(call).arg(autoDetect ? "yes" : "no"));
     m_dxc->connectToCluster(host, static_cast<quint16>(port), call);
     refreshStatusBar();
 }
