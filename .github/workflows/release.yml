@@ -127,19 +127,22 @@ jobs:
 
       - name: Trim unused Qt SQL drivers (post-build, pre-AppImage)
         # linuxdeploy-plugin-qt scans $QT_ROOT_DIR/plugins/sqldrivers and
-        # tries to bundle every driver, failing when one links against a
-        # system library the runner doesn't have (e.g. libmimerapi.so for
-        # the Mimer driver).  We only use SQLite.  This MUST run after
-        # Build because Qt6Sql's CMake config references the driver
-        # filenames directly during configure — deleting them earlier
-        # breaks Qt6QMYSQLDriverPlugin's imported target.
+        # tries to bundle every file there as an ELF binary — including
+        # drivers like Mimer that need libraries the runner doesn't have,
+        # AND any non-.so files that happen to be present (it doesn't
+        # filter by extension).  We only use SQLite.  Delete every other
+        # driver, and DO NOT leave any stray files behind.
+        #
+        # This must run after Build because Qt6Sql's CMake config
+        # references the driver filenames directly during configure —
+        # deleting them earlier breaks Qt6QMYSQLDriverPlugin's imported
+        # target.
         run: |
           cd "$QT_ROOT_DIR/plugins/sqldrivers"
-          ls -1 | tee before.txt
+          echo "Before:"; ls -1
           find . -maxdepth 1 -type f -name '*.so' \
                  ! -name 'libqsqlite.so' -delete
-          echo "---"
-          ls -1 | tee after.txt
+          echo "After:"; ls -1
 
       - name: Stage AppDir
         run: |
