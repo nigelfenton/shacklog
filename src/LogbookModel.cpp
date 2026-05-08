@@ -393,7 +393,7 @@ Qso LogbookModel::getQso(qint64 id, bool* ok) const
     return q;
 }
 
-QString LogbookModel::filterToSql(const QueryFilter& filter, QVariantList* binds) const
+QString LogbookModel::filterToSql(const LogbookFilter& filter, QVariantList* binds) const
 {
     QStringList where;
     if (!filter.text.isEmpty()) {
@@ -417,7 +417,7 @@ QString LogbookModel::filterToSql(const QueryFilter& filter, QVariantList* binds
     return " WHERE " + where.join(" AND ");
 }
 
-QVector<Qso> LogbookModel::queryQsos(const QueryFilter& filter) const
+QVector<Qso> LogbookModel::queryQsos(const LogbookFilter& filter) const
 {
     QVector<Qso> out;
     if (!m_db.isOpen()) return out;
@@ -438,7 +438,7 @@ QVector<Qso> LogbookModel::queryQsos(const QueryFilter& filter) const
     return out;
 }
 
-int LogbookModel::countQsos(const QueryFilter& filter) const
+int LogbookModel::countQsos(const LogbookFilter& filter) const
 {
     if (!m_db.isOpen()) return 0;
     QVariantList binds;
@@ -568,7 +568,7 @@ QString LogbookModel::adifField(const QString& tag, const QString& value)
     return QString("<%1:%2>%3 ").arg(tag, QString::number(utf8.size()), value);
 }
 
-int LogbookModel::exportAdif(const QString& filePath, const QueryFilter& filter) const
+int LogbookModel::exportAdif(const QString& filePath, const LogbookFilter& filter) const
 {
     QFile f(filePath);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
@@ -636,7 +636,7 @@ int LogbookModel::exportAdif(const QString& filePath, const QueryFilter& filter)
 
 int LogbookModel::exportCabrillo(const QString& filePath,
                                  const QString& contestId,
-                                 const QueryFilter& filter) const
+                                 const LogbookFilter& filter) const
 {
     QFile f(filePath);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
@@ -672,7 +672,7 @@ int LogbookModel::exportCabrillo(const QString& filePath,
         out << "EMAIL: " << setting("CABRILLO_EMAIL") << "\r\n";
     out << "CREATED-BY: " << kAdifProgramId << "\r\n";
 
-    QueryFilter filt = filter;
+    LogbookFilter filt = filter;
     filt.contestId = contestId;
     const QVector<Qso> rows = queryQsos(filt);
 

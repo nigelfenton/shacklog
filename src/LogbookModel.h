@@ -25,6 +25,21 @@
 
 namespace ShackLog {
 
+// Query filter for queryQsos / countQsos / export.  Lives at namespace
+// scope rather than nested inside LogbookModel because GCC and Clang
+// (correctly, per the C++ standard) reject default arguments that
+// reference a nested struct whose default member initializers haven't
+// been processed yet — and `int limit{0}` here is one of those.
+struct LogbookFilter {
+    QString text;
+    QString band;
+    QString mode;
+    QString contestId;               // "<NONE>" filters to non-contest QSOs only
+    QString dateFrom;                // ADIF YYYYMMDD inclusive
+    QString dateTo;
+    int     limit{0};
+};
+
 class LogbookModel : public QObject {
     Q_OBJECT
 
@@ -45,17 +60,8 @@ public:
     bool deleteQso(qint64 id);
     Qso  getQso(qint64 id, bool* ok = nullptr) const;
 
-    struct QueryFilter {
-        QString text;
-        QString band;
-        QString mode;
-        QString contestId;               // "<NONE>" filters to non-contest QSOs only
-        QString dateFrom;                // ADIF YYYYMMDD inclusive
-        QString dateTo;
-        int     limit{0};
-    };
-    QVector<Qso> queryQsos(const QueryFilter& filter = QueryFilter()) const;
-    int          countQsos(const QueryFilter& filter = QueryFilter()) const;
+    QVector<Qso> queryQsos(const LogbookFilter& filter = {}) const;
+    int          countQsos(const LogbookFilter& filter = {}) const;
 
     bool isDuplicate(const QString& call,
                      const QString& band,
@@ -74,10 +80,10 @@ public:
     QString contestId() const         { return settingValue("CONTEST_ID"); }
 
     // ── Export ────────────────────────────────────────────────────────
-    int exportAdif(const QString& filePath, const QueryFilter& filter = QueryFilter()) const;
+    int exportAdif(const QString& filePath, const LogbookFilter& filter = {}) const;
     int exportCabrillo(const QString& filePath,
                        const QString& contestId,
-                       const QueryFilter& filter = QueryFilter()) const;
+                       const LogbookFilter& filter = {}) const;
 
     // ── Static helpers ────────────────────────────────────────────────
     // Map a frequency in MHz to an ADIF band string ("20m", "70cm", ...).
@@ -108,7 +114,7 @@ private:
     bool setSchemaVersion(int v);
 
     static Qso qsoFromRow(class QSqlQuery& q);
-    QString    filterToSql(const QueryFilter& filter, QVariantList* binds) const;
+    QString    filterToSql(const LogbookFilter& filter, QVariantList* binds) const;
 
     QSqlDatabase m_db;
     QString      m_lastError;

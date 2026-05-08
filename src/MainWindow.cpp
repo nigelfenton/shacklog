@@ -604,7 +604,7 @@ void MainWindow::populateContestFilter()
 void MainWindow::refreshTable()
 {
     if (!m_model || !m_table) return;
-    LogbookModel::QueryFilter f;
+    LogbookFilter f;
     f.text      = m_filterText    ? m_filterText->text().trimmed() : QString{};
     f.band      = m_filterBand    ? m_filterBand->currentData().toString()    : QString{};
     f.mode      = m_filterMode    ? m_filterMode->currentData().toString()    : QString{};
@@ -733,7 +733,7 @@ void MainWindow::onExportAdif()
                                      defaultName);
     if (path.isEmpty()) return;
 
-    LogbookModel::QueryFilter f;
+    LogbookFilter f;
     f.text      = m_filterText    ? m_filterText->text().trimmed() : QString{};
     f.band      = m_filterBand    ? m_filterBand->currentData().toString()    : QString{};
     f.mode      = m_filterMode    ? m_filterMode->currentData().toString()    : QString{};
