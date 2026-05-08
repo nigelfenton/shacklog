@@ -33,7 +33,14 @@ public:
     explicit DxClusterClient(QObject* parent = nullptr);
     ~DxClusterClient() override;
 
-    void connectToCluster(const QString& host, quint16 port, const QString& callsign);
+    // The login is sent as <callsign><loginSuffix>.  Common values:
+    //   "-2" — DXSpider's preferred secondary-station SSID (default)
+    //   ""   — bare callsign (for clusters with strict regex; risks
+    //          kicking the operator's primary session)
+    //   "-L" — CC Cluster / AR-Cluster "logger" suffix (rejected by DXSpider)
+    void connectToCluster(const QString& host, quint16 port,
+                          const QString& callsign,
+                          const QString& loginSuffix = QStringLiteral("-2"));
     void disconnectFromCluster();
 
     bool connected() const { return m_connected; }
@@ -43,6 +50,7 @@ signals:
     void connectionChanged(bool connected);
     void spotReceived(const ShackLog::SpotData& spot);
     void rawLine(const QString& line);            // diagnostic
+    void loginRejected(const QString& reason);    // server refused our callsign
 
 private slots:
     void onConnected();
@@ -64,7 +72,8 @@ private:
 
     QString  m_host;
     quint16  m_port{0};
-    QString  m_callsign;             // bare callsign, "-L" is appended on send
+    QString  m_callsign;             // bare callsign
+    QString  m_loginSuffix{"-2"};    // appended at login
     bool     m_loginSent{false};
     bool     m_userInitiatedDisconnect{false};
     bool     m_connected{false};

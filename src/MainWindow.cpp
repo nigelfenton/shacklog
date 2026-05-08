@@ -134,6 +134,20 @@ MainWindow::MainWindow(QWidget* parent)
             this, &MainWindow::onClusterSpotReceived);
     connect(m_dxc, &DxClusterClient::rawLine,
             this, &MainWindow::onClusterRawLine);
+    connect(m_dxc, &DxClusterClient::loginRejected, this,
+            [this](const QString& reason) {
+                if (m_dxcLog) {
+                    m_dxcLog->appendPlainText(
+                        QString("[%1] LOGIN REJECTED: %2 — auto-reconnect stopped. "
+                                "Try a different Login suffix in Settings → DX Cluster.")
+                            .arg(QDateTime::currentDateTime().toString("HH:mm:ss"))
+                            .arg(reason));
+                }
+                statusBar()->showMessage(
+                    QString("Cluster rejected login (%1) — see DX Cluster Log").arg(reason),
+                    8000);
+                refreshStatusBar();
+            });
 
     // Hidden, lazy-shown diagnostic buffer for the cluster traffic.
     // Populated continuously so it has history when first opened.
@@ -1051,11 +1065,13 @@ void MainWindow::applyClusterConfigFromSettings()
         refreshStatusBar();
         return;
     }
+    const QString suffix = m_model->settingValue("DXC_LOGIN_SUFFIX", "-2");
     if (m_dxcLog)
         m_dxcLog->appendPlainText(
-            QString("[apply] connect %1:%2 as %3-L (auto=%4)")
-                .arg(host).arg(port).arg(call).arg(autoDetect ? "yes" : "no"));
-    m_dxc->connectToCluster(host, static_cast<quint16>(port), call);
+            QString("[apply] connect %1:%2 as %3%4 (auto=%5)")
+                .arg(host).arg(port).arg(call).arg(suffix)
+                .arg(autoDetect ? "yes" : "no"));
+    m_dxc->connectToCluster(host, static_cast<quint16>(port), call, suffix);
     refreshStatusBar();
 }
 

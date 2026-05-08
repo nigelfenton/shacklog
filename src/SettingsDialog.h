@@ -55,6 +55,7 @@ private:
     QLineEdit*  m_dxcHost{};
     QSpinBox*   m_dxcPort{};
     QLineEdit*  m_dxcCallsign{};
+    QComboBox*  m_dxcLoginSuffix{};
     QLabel*     m_dxcDetected{};
 
     // Contest

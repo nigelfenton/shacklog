@@ -96,7 +96,14 @@ void SettingsDialog::buildUI()
     m_dxcPort->setRange(1, 65535);
     m_dxcPort->setValue(7300);
     m_dxcCallsign   = new QLineEdit;
-    m_dxcCallsign->setPlaceholderText("G0JKN  (\"-L\" suffix is appended at login)");
+    m_dxcCallsign->setPlaceholderText("G0JKN");
+    m_dxcLoginSuffix = new QComboBox;
+    m_dxcLoginSuffix->setEditable(true);
+    m_dxcLoginSuffix->addItem("-2",  "-2");      // DXSpider preferred
+    m_dxcLoginSuffix->addItem("-1",  "-1");
+    m_dxcLoginSuffix->addItem("-3",  "-3");
+    m_dxcLoginSuffix->addItem("-L (CC Cluster / AR-Cluster)", "-L");
+    m_dxcLoginSuffix->addItem("(none — bare callsign)",       "");
     m_dxcDetected   = new QLabel("(no AetherSDR config detected)");
     m_dxcDetected->setStyleSheet("QLabel { color: #6b8099; font-size: 10px; }");
     m_dxcDetected->setWordWrap(true);
@@ -107,6 +114,7 @@ void SettingsDialog::buildUI()
     dxcL->addRow("Host (override)",     m_dxcHost);
     dxcL->addRow("Port (override)",     m_dxcPort);
     dxcL->addRow("Callsign (override)", m_dxcCallsign);
+    dxcL->addRow("Login suffix",        m_dxcLoginSuffix);
 
     auto refreshDxcEditable = [this]() {
         const bool manual = !m_dxcAutoDetect->isChecked();
@@ -207,6 +215,16 @@ void SettingsDialog::populate()
     m_dxcPort->setValue(m_model->settingValue("DXC_PORT",
                             QString::number(aether.found ? aether.port : 7300)).toInt());
     m_dxcCallsign->setText(m_model->settingValue("DXC_CALLSIGN", aether.callsign));
+    const QString storedSuffix = m_model->settingValue("DXC_LOGIN_SUFFIX", "-2");
+    int suffixIdx = -1;
+    for (int i = 0; i < m_dxcLoginSuffix->count(); ++i) {
+        if (m_dxcLoginSuffix->itemData(i).toString() == storedSuffix) {
+            suffixIdx = i;
+            break;
+        }
+    }
+    if (suffixIdx >= 0) m_dxcLoginSuffix->setCurrentIndex(suffixIdx);
+    else                m_dxcLoginSuffix->setEditText(storedSuffix);
     const bool manual = !m_dxcAutoDetect->isChecked();
     m_dxcHost->setEnabled(manual);
     m_dxcPort->setEnabled(manual);
@@ -256,6 +274,19 @@ void SettingsDialog::onAccept()
     m_model->setSetting("DXC_HOST",         m_dxcHost->text().trimmed());
     m_model->setSetting("DXC_PORT",         QString::number(m_dxcPort->value()));
     m_model->setSetting("DXC_CALLSIGN",     m_dxcCallsign->text().trimmed().toUpper());
+    // Stored value is the canonical suffix string (the part actually appended
+    // to the callsign).  If the user typed something custom we save the raw
+    // text; otherwise we save the data() slot of the selected combo entry.
+    {
+        const int idx = m_dxcLoginSuffix->currentIndex();
+        QString suffix;
+        if (idx >= 0 && m_dxcLoginSuffix->currentText() == m_dxcLoginSuffix->itemText(idx)) {
+            suffix = m_dxcLoginSuffix->itemData(idx).toString();
+        } else {
+            suffix = m_dxcLoginSuffix->currentText().trimmed();
+        }
+        m_model->setSetting("DXC_LOGIN_SUFFIX", suffix);
+    }
 
     m_model->setSetting("CONTEST_MODE",     m_contestMode->isChecked() ? "1" : "0");
     m_model->setSetting("CONTEST_ID",       m_contestId->currentText().trimmed().toUpper());

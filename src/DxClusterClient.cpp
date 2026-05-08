@@ -49,7 +49,7 @@ DxClusterClient::DxClusterClient(QObject* parent)
     // greet briefly and start streaming without explicit prompting.
     connect(m_loginTimer, &QTimer::timeout, this, [this]() {
         if (m_connected && !m_loginSent) {
-            m_socket->write((m_callsign + "-L\r\n").toUtf8());
+            m_socket->write((m_callsign + m_loginSuffix + "\r\n").toUtf8());
             m_loginSent = true;
         }
     });
@@ -64,13 +64,16 @@ DxClusterClient::~DxClusterClient()
     }
 }
 
-void DxClusterClient::connectToCluster(const QString& host, quint16 port, const QString& callsign)
+void DxClusterClient::connectToCluster(const QString& host, quint16 port,
+                                       const QString& callsign,
+                                       const QString& loginSuffix)
 {
     m_userInitiatedDisconnect = false;
     m_reconnectAttempts = 0;
     m_host = host;
     m_port = port;
     m_callsign = callsign.trimmed().toUpper();
+    m_loginSuffix = loginSuffix.trimmed();
     m_loginSent = false;
     m_rxBuffer.clear();
 
@@ -123,7 +126,11 @@ void DxClusterClient::onReadyRead()
         const QString line = QString::fromLatin1(rawBytes).trimmed();
         if (!line.isEmpty()) {
             emit rawLine(line);
-            if (!m_loginSent) maybeSendLogin(line);
+            // maybeSendLogin handles BOTH the "send login on prompt" and
+            // "abort on login-rejection" cases — keep it firing for every
+            // line so we can detect rejections that arrive after the
+            // login was sent.
+            maybeSendLogin(line);
             parseLine(line);
         }
     }
@@ -139,11 +146,29 @@ void DxClusterClient::onReadyRead()
 void DxClusterClient::maybeSendLogin(const QString& chunk)
 {
     const QString lower = chunk.toLower();
+
+    // Catch a login-rejection message before we re-send the login on
+    // the same prompt.  DXSpider answers "login: Sorry G0JKN-L is an
+    // invalid callsign" and re-prompts; without this guard we'd loop
+    // forever bouncing between connect → reject → reconnect.
+    if (m_loginSent && (lower.contains("invalid callsign") ||
+                        lower.contains("invalid login")    ||
+                        lower.contains("sorry"))) {
+        const QString reason = chunk.trimmed();
+        m_lastError = reason;
+        m_userInitiatedDisconnect = true;     // stop the auto-reconnect spam
+        cancelReconnect();
+        emit loginRejected(reason);
+        if (m_socket && m_socket->state() != QAbstractSocket::UnconnectedState)
+            m_socket->disconnectFromHost();
+        return;
+    }
+
     if (lower.contains("login")     ||
         lower.contains("callsign")  ||
         lower.contains("call:")     ||
         lower.contains("your call")) {
-        m_socket->write((m_callsign + "-L\r\n").toUtf8());
+        m_socket->write((m_callsign + m_loginSuffix + "\r\n").toUtf8());
         m_loginSent = true;
         m_loginTimer->stop();
     }
