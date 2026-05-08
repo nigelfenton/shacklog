@@ -163,10 +163,12 @@ jobs:
           Terminal=false
           EOF
 
-          # Placeholder 1×1 transparent PNG — replace with real artwork later.
-          # base64 of a 1x1 transparent PNG.
-          echo 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQMAAAAl21bKAAAAA1BMVEUAAACnej3aAAAAAXRSTlMAQObYZgAAAApJREFUeNpjYAAAAAIAAUivpHEAAAAASUVORK5CYII=' \
-            | base64 -d > AppDir/usr/share/icons/hicolor/256x256/apps/shacklog.png
+          # Placeholder 256×256 solid-fill icon — replace with real artwork
+          # later.  We use ImageMagick (preinstalled on ubuntu-22.04
+          # runners) so the PNG is unambiguously valid; embedding base64
+          # of a 1×1 PNG turns out to upset linuxdeploy's CImg validator.
+          convert -size 256x256 xc:'#0a1320' \
+              AppDir/usr/share/icons/hicolor/256x256/apps/shacklog.png
 
       - name: Build AppImage
         run: |
