@@ -87,8 +87,45 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: windows
+          name: windows-zip
           path: ShackLog-*-windows-x64.zip
+          if-no-files-found: error
+
+      - name: Build Inno Setup installer
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}"
+          if ([string]::IsNullOrEmpty($version) -or -not $version.StartsWith("v")) {
+              $version = "dev-$($env:GITHUB_SHA.Substring(0,7))"
+          }
+          $stage = "ShackLog-$version-windows-x64"
+
+          # Inno Setup 6 ships preinstalled on windows-2022 GitHub runners;
+          # if a future image drops it, fall back to chocolatey.
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+              choco install innosetup -y --no-progress
+          }
+          if (-not (Test-Path $iscc)) {
+              throw "ISCC.exe not found at $iscc — Inno Setup install failed"
+          }
+
+          # ISCC reads SHACKLOG_VERSION + SHACKLOG_STAGING via GetEnv() in
+          # the .iss script.
+          $env:SHACKLOG_VERSION = $version.TrimStart("v")
+          $env:SHACKLOG_STAGING = (Resolve-Path $stage).Path
+          & $iscc installer\shacklog.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit $LASTEXITCODE" }
+
+          # The .iss writes to installer-output\ — flatten so the upload
+          # action glob picks it up next to the working directory.
+          Move-Item installer-output\*.exe . -Force
+          Get-ChildItem ShackLog-Setup-*.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: ShackLog-Setup-*-windows-x64.exe
           if-no-files-found: error
 
   # ── Linux (AppImage) ────────────────────────────────────────────────────
@@ -260,7 +297,8 @@ jobs:
       - name: Flatten artifacts
         run: |
           mkdir -p out
-          find artifacts -type f \( -name '*.zip' -o -name '*.AppImage' -o -name '*.dmg' \) \
+          find artifacts -type f \
+              \( -name '*.zip' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.exe' \) \
               -exec cp -v {} out/ \;
           ls -lh out/
 
@@ -274,3 +312,4 @@ jobs:
             out/*.zip
             out/*.AppImage
             out/*.dmg
+            out/*.exe
