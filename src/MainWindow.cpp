@@ -227,6 +227,7 @@ void MainWindow::buildMenus()
     m_actDisconnectTci = toolsMenu->addAction("&Disconnect TCI", this, &MainWindow::onDisconnectTci);
     toolsMenu->addSeparator();
     m_actDxcLog        = toolsMenu->addAction("DX Cluster &Log…", this, &MainWindow::onShowClusterLog);
+    m_actSpotIndex     = toolsMenu->addAction("Show Spot &Index…", this, &MainWindow::onShowSpotIndex);
 
     auto* helpMenu = menuBar()->addMenu("&Help");
     m_actAbout = helpMenu->addAction("&About ShackLog", this, &MainWindow::onAbout);
@@ -1043,6 +1044,56 @@ void MainWindow::onClusterRawLine(const QString& line)
     m_dxcLog->appendPlainText(QString("[%1] %2")
                                   .arg(QDateTime::currentDateTime().toString("HH:mm:ss"))
                                   .arg(line));
+}
+
+void MainWindow::onShowSpotIndex()
+{
+    if (!m_spotIndex) return;
+
+    auto* dlg = new QDialog(this);
+    dlg->setWindowTitle("Spot Index");
+    dlg->resize(900, 520);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+
+    auto* lay = new QVBoxLayout(dlg);
+    auto* hint = new QLabel(QString("%1 spots currently held — sorted by frequency. "
+                                    "Use this to verify a spot you expected to autofill "
+                                    "is actually in the index.").arg(m_spotIndex->size()));
+    hint->setWordWrap(true);
+    hint->setStyleSheet("QLabel { color: #6b8099; font-size: 10px; }");
+    lay->addWidget(hint);
+
+    auto* table = new QTableWidget;
+    table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    table->setSelectionBehavior(QAbstractItemView::SelectRows);
+    table->setAlternatingRowColors(true);
+    table->verticalHeader()->setVisible(false);
+    table->setColumnCount(5);
+    table->setHorizontalHeaderLabels({"Freq (MHz)", "Mode", "Call", "Source", "Comment"});
+    table->horizontalHeader()->setStretchLastSection(true);
+
+    const auto rows = m_spotIndex->snapshot();
+    table->setRowCount(rows.size());
+    for (int i = 0; i < rows.size(); ++i) {
+        const auto& s = rows[i];
+        table->setItem(i, 0, new QTableWidgetItem(QString::number(s.freqMhz, 'f', 4)));
+        table->setItem(i, 1, new QTableWidgetItem(s.mode));
+        table->setItem(i, 2, new QTableWidgetItem(s.call));
+        table->setItem(i, 3, new QTableWidgetItem(s.source));
+        table->setItem(i, 4, new QTableWidgetItem(s.comment));
+    }
+    table->resizeColumnsToContents();
+    table->horizontalHeader()->setStretchLastSection(true);
+    lay->addWidget(table, 1);
+
+    auto* row = new QHBoxLayout;
+    auto* closeBtn = new QPushButton("Close");
+    connect(closeBtn, &QPushButton::clicked, dlg, &QDialog::close);
+    row->addStretch();
+    row->addWidget(closeBtn);
+    lay->addLayout(row);
+
+    dlg->show();
 }
 
 void MainWindow::onShowClusterLog()

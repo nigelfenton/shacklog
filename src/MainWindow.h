@@ -74,6 +74,7 @@ private slots:
     void onClusterRawLine(const QString& line);
     void purgeStaleSpots();
     void onShowClusterLog();
+    void onShowSpotIndex();
 
     // POTA (Phase 3)
     void onPotaSpotReceived(const ShackLog::SpotData& spot);
@@ -168,6 +169,7 @@ private:
     QAction* m_actConnectTci{};
     QAction* m_actDisconnectTci{};
     QAction* m_actDxcLog{};
+    QAction* m_actSpotIndex{};
     QAction* m_actNew{};
     QAction* m_actEdit{};
     QAction* m_actDelete{};

@@ -21,6 +21,7 @@
 #include <QObject>
 #include <QHash>
 #include <QString>
+#include <QVector>
 #include <optional>
 
 namespace ShackLog {
@@ -49,6 +50,10 @@ public:
     // Step in Hz used for the given mode — exposed so callers can use
     // the same rounding rule outside the index (e.g. UI display).
     static int stepHzForMode(const QString& adifMode);
+
+    // Snapshot of all current spots — used by the diagnostic Tools →
+    // Show Spot Index dialog.  Sorted by freq ascending.
+    QVector<SpotData> snapshot() const;
 
 signals:
     void spotAdded(const SpotData& spot);
