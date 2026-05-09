@@ -927,14 +927,36 @@ void MainWindow::onTciModeChanged(const QString& mode)
 void MainWindow::tryAutofillFromSpot()
 {
     if (!m_spotIndex || !m_callEdit) return;
+
+    auto logLookup = [this](const QString& outcome) {
+        if (!m_dxcLog) return;
+        m_dxcLog->appendPlainText(
+            QString("[%1] LOOKUP @ %2 MHz mode=%3 callField='%4' indexSize=%5 → %6")
+                .arg(QDateTime::currentDateTime().toString("HH:mm:ss"))
+                .arg(m_curFreqMhz, 0, 'f', 4)
+                .arg(m_curMode.isEmpty() ? "?" : m_curMode)
+                .arg(m_callEdit->text().trimmed())
+                .arg(m_spotIndex ? m_spotIndex->size() : 0)
+                .arg(outcome));
+    };
+
     // Don't overwrite the operator's typing.  Once they've started a
     // call, stay out of their way until they save (which clears the
     // field) or manually delete it.
-    if (!m_callEdit->text().trimmed().isEmpty()) return;
-    if (m_curFreqMhz <= 0.0 || m_curMode.isEmpty()) return;
+    if (!m_callEdit->text().trimmed().isEmpty()) {
+        logLookup("skip: call field non-empty");
+        return;
+    }
+    if (m_curFreqMhz <= 0.0 || m_curMode.isEmpty()) {
+        logLookup("skip: freq/mode unknown");
+        return;
+    }
 
     auto hit = m_spotIndex->findAt(m_curFreqMhz, m_curMode);
-    if (!hit) return;
+    if (!hit) {
+        logLookup("no spot in index");
+        return;
+    }
 
     m_callEdit->setText(hit->call);
     m_saveBtn->setEnabled(true);
@@ -947,6 +969,7 @@ void MainWindow::tryAutofillFromSpot()
         !hit->comment.isEmpty()) {
         m_commentEdit->setText(hit->comment);
     }
+    logLookup(QString("HIT %1 (%2)").arg(hit->call, hit->source));
     statusBar()->showMessage(
         QString("Auto-filled from %1 (%2)").arg(hit->source, hit->call), 3500);
 }
