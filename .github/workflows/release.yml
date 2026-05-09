@@ -111,15 +111,15 @@ jobs:
           }
 
           # ISCC reads SHACKLOG_VERSION + SHACKLOG_STAGING via GetEnv() in
-          # the .iss script.
+          # the .iss script.  /O. forces the output to the working
+          # directory regardless of where the .iss file lives, otherwise
+          # the OutputDir directive in the script is interpreted relative
+          # to the .iss path (i.e. installer\installer-output\).
           $env:SHACKLOG_VERSION = $version.TrimStart("v")
           $env:SHACKLOG_STAGING = (Resolve-Path $stage).Path
-          & $iscc installer\shacklog.iss
+          & $iscc /O. installer\shacklog.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit $LASTEXITCODE" }
 
-          # The .iss writes to installer-output\ — flatten so the upload
-          # action glob picks it up next to the working directory.
-          Move-Item installer-output\*.exe . -Force
           Get-ChildItem ShackLog-Setup-*.exe
 
       - uses: actions/upload-artifact@v4
