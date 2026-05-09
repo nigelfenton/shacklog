@@ -339,6 +339,13 @@ void MainWindow::buildUI()
         m_commentEdit = new QLineEdit;
         m_commentEdit->setStyleSheet(kEditStyle);
         m_commentEdit->setPlaceholderText("comment / exchange");
+        // If the operator types in the comment field, mark it as
+        // user-owned so future auto-fills don't stomp on their text.
+        connect(m_commentEdit, &QLineEdit::textEdited, this,
+                [this](const QString& t) {
+                    if (t.trimmed() != m_lastAutofilledComment)
+                        m_lastAutofilledComment.clear();
+                });
 
         m_dupBadge = new QLabel("DUPE");
         m_dupBadge->setStyleSheet(kDupBadgeIdle);
@@ -539,6 +546,11 @@ void MainWindow::onCallEdited(const QString& text)
         m_callEdit->setText(upper);
         m_callEdit->setCursorPosition(cursor);
     }
+    // The operator just edited the call manually — relinquish ownership
+    // of the field so future spot-click auto-fill doesn't overwrite it.
+    if (upper.trimmed() != m_lastAutofilledCall) {
+        m_lastAutofilledCall.clear();
+    }
     m_saveBtn->setEnabled(!upper.trimmed().isEmpty());
     refreshDupBadge();
 }
@@ -599,6 +611,10 @@ void MainWindow::onSaveQso()
     m_commentEdit->clear();
     m_srxEdit->clear();
     m_srxStringEdit->clear();
+    // Slate is clean post-save — drop any "we own this field" markers
+    // so the next freq change will autofill afresh.
+    m_lastAutofilledCall.clear();
+    m_lastAutofilledComment.clear();
     if (m_model->contestMode()) {
         const int next = m_stxEdit->text().toInt() + 1;
         m_stxEdit->setText(QString::number(next));
@@ -949,34 +965,48 @@ void MainWindow::tryAutofillFromSpot()
                 .arg(outcome));
     };
 
-    // Don't overwrite the operator's typing.  Once they've started a
-    // call, stay out of their way until they save (which clears the
-    // field) or manually delete it.
-    if (!m_callEdit->text().trimmed().isEmpty()) {
-        logLookup("skip: call field non-empty");
-        return;
-    }
     if (m_curFreqMhz <= 0.0 || m_curMode.isEmpty()) {
         logLookup("skip: freq/mode unknown");
         return;
     }
 
-    auto hit = m_spotIndex->findAt(m_curFreqMhz, m_curMode);
-    if (!hit) {
-        logLookup("no spot in index");
+    const QString currentCall = m_callEdit->text().trimmed();
+    const bool fieldIsOurs    = currentCall.isEmpty() ||
+                                currentCall == m_lastAutofilledCall;
+    if (!fieldIsOurs) {
+        // Operator typed something — never overwrite their input.
+        logLookup("skip: call field user-edited");
         return;
     }
 
+    auto hit = m_spotIndex->findAt(m_curFreqMhz, m_curMode);
+    if (!hit) {
+        // No matching spot.  Leave any previous auto-fill in place — the
+        // operator may have done a small QSY around the same station.
+        logLookup(currentCall.isEmpty()
+                      ? QString("no spot in index")
+                      : QString("no spot — keeping previous auto-fill %1").arg(currentCall));
+        return;
+    }
+
+    // We have a match for the current bucket — replace whatever was
+    // there (ours or empty) with the new spot.
     m_callEdit->setText(hit->call);
+    m_lastAutofilledCall = hit->call;
     m_saveBtn->setEnabled(true);
     refreshDupBadge();
 
-    // Drop the spot's comment into the COMMENT/EXCH field IF the operator
-    // hasn't put anything there yet.  Useful for POTA park refs and
-    // cluster notes.
-    if (m_commentEdit && m_commentEdit->text().trimmed().isEmpty() &&
-        !hit->comment.isEmpty()) {
-        m_commentEdit->setText(hit->comment);
+    // Comment field: replace if it's empty OR if it equals the comment
+    // we put there from the previous auto-fill (so spot-to-spot hops
+    // refresh the park ref / cluster note cleanly).
+    if (m_commentEdit) {
+        const QString currentComment = m_commentEdit->text().trimmed();
+        const bool commentIsOurs = currentComment.isEmpty() ||
+                                   currentComment == m_lastAutofilledComment;
+        if (commentIsOurs) {
+            m_commentEdit->setText(hit->comment);
+            m_lastAutofilledComment = hit->comment;
+        }
     }
     logLookup(QString("HIT %1 (%2)").arg(hit->call, hit->source));
     statusBar()->showMessage(

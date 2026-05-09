@@ -112,6 +112,12 @@ private:
     QString m_curSubmode;    // ADIF submode (USB/LSB)
     QString m_rawTciMode;    // for display only
 
+    // Last call we auto-filled — used to decide whether the call field
+    // is "ours" (safe to overwrite on the next spot click) or the
+    // operator's typed input (must be left alone).
+    QString m_lastAutofilledCall;
+    QString m_lastAutofilledComment;
+
     // Header
     QLabel*  m_myCallLabel{};
     QLabel*  m_freqLabel{};
