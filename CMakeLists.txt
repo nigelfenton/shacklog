@@ -47,6 +47,8 @@ set(SHACKLOG_SOURCES
     src/AetherSettingsReader.h
     src/DxClusterClient.cpp
     src/DxClusterClient.h
+    src/PotaClient.cpp
+    src/PotaClient.h
 )
 
 # Windows: link as a GUI app so no console window appears at launch.

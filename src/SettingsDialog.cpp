@@ -116,6 +116,19 @@ void SettingsDialog::buildUI()
     dxcL->addRow("Callsign (override)", m_dxcCallsign);
     dxcL->addRow("Login suffix",        m_dxcLoginSuffix);
 
+    // ── POTA section (lives on the same tab — both feed the SpotIndex) ──
+    auto* potaSep = new QLabel("─── POTA (api.pota.app) ───");
+    potaSep->setStyleSheet("QLabel { color: #6b8099; font-size: 9px; "
+                           "font-weight: bold; letter-spacing: 0.08em; }");
+    dxcL->addRow(potaSep);
+
+    m_potaEnable  = new QCheckBox("Enable POTA spotting (Parks On The Air HTTP feed)");
+    m_potaPollSec = new QSpinBox;
+    m_potaPollSec->setRange(5, 600);
+    m_potaPollSec->setSuffix(" s");
+    dxcL->addRow(m_potaEnable);
+    dxcL->addRow("POTA poll interval", m_potaPollSec);
+
     auto refreshDxcEditable = [this]() {
         const bool manual = !m_dxcAutoDetect->isChecked();
         m_dxcHost->setEnabled(manual);
@@ -225,6 +238,10 @@ void SettingsDialog::populate()
     }
     if (suffixIdx >= 0) m_dxcLoginSuffix->setCurrentIndex(suffixIdx);
     else                m_dxcLoginSuffix->setEditText(storedSuffix);
+
+    m_potaEnable->setChecked(m_model->settingValue("POTA_ENABLE", "1") == "1");
+    m_potaPollSec->setValue(m_model->settingValue("POTA_POLL_SEC", "30").toInt());
+
     const bool manual = !m_dxcAutoDetect->isChecked();
     m_dxcHost->setEnabled(manual);
     m_dxcPort->setEnabled(manual);
@@ -287,6 +304,9 @@ void SettingsDialog::onAccept()
         }
         m_model->setSetting("DXC_LOGIN_SUFFIX", suffix);
     }
+
+    m_model->setSetting("POTA_ENABLE",   m_potaEnable->isChecked() ? "1" : "0");
+    m_model->setSetting("POTA_POLL_SEC", QString::number(m_potaPollSec->value()));
 
     m_model->setSetting("CONTEST_MODE",     m_contestMode->isChecked() ? "1" : "0");
     m_model->setSetting("CONTEST_ID",       m_contestId->currentText().trimmed().toUpper());

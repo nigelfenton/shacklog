@@ -6,6 +6,7 @@
 #include "SettingsDialog.h"
 #include "SpotIndex.h"
 #include "DxClusterClient.h"
+#include "PotaClient.h"
 #include "AetherSettingsReader.h"
 
 #include <QDialog>
@@ -104,6 +105,7 @@ MainWindow::MainWindow(QWidget* parent)
       m_tci(new TciClient(this)),
       m_spotIndex(new SpotIndex(this)),
       m_dxc(new DxClusterClient(this)),
+      m_pota(new PotaClient(this)),
       m_spotPurgeTimer(new QTimer(this))
 {
     setWindowTitle("ShackLog");
@@ -134,6 +136,11 @@ MainWindow::MainWindow(QWidget* parent)
             this, &MainWindow::onClusterSpotReceived);
     connect(m_dxc, &DxClusterClient::rawLine,
             this, &MainWindow::onClusterRawLine);
+    connect(m_pota, &PotaClient::spotReceived,
+            this, &MainWindow::onPotaSpotReceived);
+    connect(m_pota, &PotaClient::pollCompleted,
+            this, &MainWindow::onPotaPollCompleted);
+
     connect(m_dxc, &DxClusterClient::loginRejected, this,
             [this](const QString& reason) {
                 if (m_dxcLog) {
@@ -191,6 +198,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     applyAutoConnectFromSettings();
     applyClusterConfigFromSettings();
+    applyPotaConfigFromSettings();
 }
 
 MainWindow::~MainWindow() = default;
@@ -791,6 +799,7 @@ void MainWindow::onSettings()
         // Cluster config may have changed too — reapply unconditionally
         // (no-op if nothing changed; enables/disables/reconnects otherwise).
         applyClusterConfigFromSettings();
+        applyPotaConfigFromSettings();
         refreshStatusBar();
     }
 }
@@ -1096,6 +1105,49 @@ void MainWindow::applyClusterConfigFromSettings()
                 .arg(autoDetect ? "yes" : "no"));
     m_dxc->connectToCluster(host, static_cast<quint16>(port), call, suffix);
     refreshStatusBar();
+}
+
+void MainWindow::onPotaSpotReceived(const SpotData& spot)
+{
+    if (!m_spotIndex) return;
+    m_spotIndex->addOrUpdate(spot);
+    // Don't log every POTA spot individually — there are usually 200+
+    // active and that swamps the cluster log.  onPotaPollCompleted gives
+    // a per-poll summary instead.
+    refreshStatusBar();
+}
+
+void MainWindow::onPotaPollCompleted(int spots, const QString& errorOrEmpty)
+{
+    if (m_dxcLog) {
+        if (errorOrEmpty.isEmpty()) {
+            m_dxcLog->appendPlainText(QString("[%1] POTA poll: %2 spots ingested")
+                                          .arg(QDateTime::currentDateTime().toString("HH:mm:ss"))
+                                          .arg(spots));
+        } else {
+            m_dxcLog->appendPlainText(QString("[%1] POTA poll FAILED: %2")
+                                          .arg(QDateTime::currentDateTime().toString("HH:mm:ss"))
+                                          .arg(errorOrEmpty));
+        }
+    }
+    refreshStatusBar();
+}
+
+void MainWindow::applyPotaConfigFromSettings()
+{
+    if (!m_model || !m_pota) return;
+    const bool enable = m_model->settingValue("POTA_ENABLE", "1") == "1";
+    if (!enable) {
+        m_pota->stop();
+        if (m_dxcLog)
+            m_dxcLog->appendPlainText("[apply] POTA polling disabled");
+        return;
+    }
+    int sec = m_model->settingValue("POTA_POLL_SEC", "30").toInt();
+    if (sec < 5) sec = 5;
+    m_pota->start(sec);
+    if (m_dxcLog)
+        m_dxcLog->appendPlainText(QString("[apply] POTA polling started (every %1 s)").arg(sec));
 }
 
 // ── Status bar ───────────────────────────────────────────────────────────

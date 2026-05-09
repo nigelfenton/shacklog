@@ -32,6 +32,7 @@ class LogbookModel;
 class TciClient;
 class SpotIndex;
 class DxClusterClient;
+class PotaClient;
 struct SpotData;
 
 class MainWindow : public QMainWindow {
@@ -74,6 +75,10 @@ private slots:
     void purgeStaleSpots();
     void onShowClusterLog();
 
+    // POTA (Phase 3)
+    void onPotaSpotReceived(const ShackLog::SpotData& spot);
+    void onPotaPollCompleted(int spots, const QString& errorOrEmpty);
+
 private:
     void buildUI();
     void buildMenus();
@@ -88,6 +93,7 @@ private:
     void refreshStatusBar();
     void applyAutoConnectFromSettings();
     void applyClusterConfigFromSettings();
+    void applyPotaConfigFromSettings();
     void tryAutofillFromSpot();
     qint64 selectedQsoId() const;
 
@@ -95,6 +101,7 @@ private:
     TciClient*       m_tci{nullptr};
     SpotIndex*       m_spotIndex{nullptr};
     DxClusterClient* m_dxc{nullptr};
+    PotaClient*      m_pota{nullptr};
     QTimer*          m_spotPurgeTimer{nullptr};
     QPlainTextEdit*  m_dxcLog{nullptr};   // diagnostic — see onShowClusterLog()
 

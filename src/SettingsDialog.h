@@ -58,6 +58,10 @@ private:
     QComboBox*  m_dxcLoginSuffix{};
     QLabel*     m_dxcDetected{};
 
+    // POTA (HTTP poll, independent of cluster)
+    QCheckBox*  m_potaEnable{};
+    QSpinBox*   m_potaPollSec{};
+
     // Contest
     QCheckBox*  m_contestMode{};
     QComboBox*  m_contestId{};
