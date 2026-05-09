@@ -164,10 +164,16 @@ void DxClusterClient::maybeSendLogin(const QString& chunk)
         return;
     }
 
-    if (lower.contains("login")     ||
-        lower.contains("callsign")  ||
-        lower.contains("call:")     ||
-        lower.contains("your call")) {
+    // Only fire the login-send once — once m_loginSent is true the
+    // cluster has already accepted us (or is about to reject us via
+    // the branch above), so any later line that happens to mention
+    // "login" or "callsign" (the welcome banner, user list, sysop
+    // info, etc.) MUST NOT trigger a re-send.  Doing so generates
+    // "Cmd too long or has invalid characters" responses on DXSpider.
+    if (!m_loginSent && (lower.contains("login")    ||
+                         lower.contains("callsign") ||
+                         lower.contains("call:")    ||
+                         lower.contains("your call"))) {
         m_socket->write((m_callsign + m_loginSuffix + "\r\n").toUtf8());
         m_loginSent = true;
         m_loginTimer->stop();
