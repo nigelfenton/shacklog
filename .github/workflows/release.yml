@@ -26,13 +26,14 @@ permissions:
 
 env:
   QT_VERSION: '6.8.0'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true   # opt in to Node 24 now; avoids forced migration warnings
 
 jobs:
   # ── Windows ─────────────────────────────────────────────────────────────
   build-windows:
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
@@ -45,7 +46,7 @@ jobs:
           cache: true
 
       - name: Set up MSVC
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@v1.13.0
         with:
           arch: x64
 
@@ -85,7 +86,7 @@ jobs:
           Compress-Archive -Path $stage -DestinationPath "$stage.zip" -Force
           Write-Host "Created $stage.zip"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: windows-zip
           path: ShackLog-*-windows-x64.zip
@@ -122,7 +123,7 @@ jobs:
 
           Get-ChildItem ShackLog-Setup-*.exe
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: windows-installer
           path: ShackLog-Setup-*-windows-x64.exe
@@ -132,7 +133,7 @@ jobs:
   build-linux:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install build deps
         run: |
@@ -228,7 +229,7 @@ jobs:
           mv ShackLog*.AppImage "ShackLog-${version}-linux-x86_64.AppImage"
           ls -lh ShackLog-*.AppImage
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: linux
           path: ShackLog-*-linux-x86_64.AppImage
@@ -238,7 +239,7 @@ jobs:
   build-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
@@ -278,7 +279,7 @@ jobs:
               "$dmg_name"
           ls -lh "$dmg_name"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: macos
           path: ShackLog-*-macos-arm64.dmg
@@ -290,7 +291,7 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           path: artifacts
 
