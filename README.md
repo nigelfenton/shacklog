@@ -10,6 +10,21 @@ AetherSDR, ExpertSDR2, SunSDR, and others.
 It exports to **ADIF 3.x** for general logbook use and **Cabrillo 3.0** for
 contest submission.
 
+## Download
+
+Pre-built binaries — including a Windows installer — are on the
+[**Releases page**](https://github.com/nigelfenton/shacklog/releases/latest):
+
+- **Windows installer** — `ShackLog-Setup-<version>-windows-x64.exe`
+  (double-click to install)
+- **Windows portable zip** — `ShackLog-<version>-windows-x64.zip`
+  (unzip and run `ShackLog.exe`)
+- **Linux AppImage** — `ShackLog-<version>-linux-x86_64.AppImage`
+  (`chmod +x` and run)
+- **macOS DMG (Apple Silicon)** — `ShackLog-<version>-macos-arm64.dmg`
+
+Or build from source — see [Build](#build) below.
+
 ## Features
 
 - Live freq / band / mode auto-fill from a TCI server (default
