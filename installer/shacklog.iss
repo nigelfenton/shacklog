@@ -40,6 +40,7 @@ AllowNoIcons=yes
 LicenseFile={#StagingDir}\LICENSE
 OutputDir=installer-output
 OutputBaseFilename=ShackLog-Setup-{#MyAppVersion}-windows-x64
+SetupIconFile=..\src\logbook.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern

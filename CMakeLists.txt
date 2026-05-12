@@ -52,8 +52,10 @@ set(SHACKLOG_SOURCES
 )
 
 # Windows: link as a GUI app so no console window appears at launch.
+# Adding shacklog.rc compiles in the app icon (logbook.ico) so Explorer
+# / taskbar / Alt-Tab show it for ShackLog.exe.
 if(WIN32)
-    add_executable(ShackLog WIN32 ${SHACKLOG_SOURCES})
+    add_executable(ShackLog WIN32 ${SHACKLOG_SOURCES} src/shacklog.rc)
 elseif(APPLE)
     add_executable(ShackLog MACOSX_BUNDLE ${SHACKLOG_SOURCES})
 else()
