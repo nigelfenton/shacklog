@@ -136,6 +136,10 @@ set(SHACKLOG_SERVER_SOURCES
     src/server/HttpServer.h
     src/server/N3fjpServer.cpp
     src/server/N3fjpServer.h
+    # ── Domain layer reused from the desktop binary (see design doc §16) ──
+    src/Qso.h
+    src/LogbookModel.cpp
+    src/LogbookModel.h
 )
 
 add_executable(shacklog-server ${SHACKLOG_SERVER_SOURCES})
@@ -145,6 +149,7 @@ target_include_directories(shacklog-server PRIVATE src src/server)
 target_link_libraries(shacklog-server PRIVATE
     Qt6::Core
     Qt6::Network
+    Qt6::Sql
 )
 
 if(MSVC)

@@ -1,24 +1,28 @@
 #pragma once
 
-// Phase-0 spike HTTP server for shacklog-server.
+// Phase-1a HTTP server for shacklog-server.
 //
 // Built on plain QTcpServer with a tiny request parser — no QHttpServer, no
 // cpp-httplib.  This is deliberate for the spike: prove three-surface
 // coexistence (HTTP / N3FJP / Qt event loop) without adding a dependency
-// that may or may not be available on every build host.  Phase 1 will swap
-// this out for either QHttpServer (if installed) or cpp-httplib (header-
-// only fallback).
+// that may or may not be available on every build host.  Later phases will
+// swap this out for either QHttpServer (if installed) or cpp-httplib.
 //
-// What this implements:
-//   GET /            -> 200, "ShackLog Server alive\n"
-//   GET /api/state   -> 200, minimal JSON {"status":"alive","version":"..."}
-//   anything else    -> 404
+// Endpoints (Phase 1a):
+//   GET /                 -> 200, "ShackLog Server alive\n"
+//   GET /api/state        -> 200, JSON with live server stats incl. QSO count
+//   GET /api/qsos         -> 200, JSON array of recent QSOs (limit query param)
+//   anything else         -> 404
 //
 // Connections are short-lived: one request, one response, close.  HTTP/1.1
-// keep-alive is not honoured.  Sufficient for the spike.
+// keep-alive is not honoured.  Sufficient until we add the WebSocket fanout.
 
 #include <QObject>
 #include <QTcpServer>
+
+namespace ShackLog {
+class LogbookModel;
+}
 
 namespace ShackLog::Server {
 
@@ -26,7 +30,7 @@ class HttpServer : public QObject {
     Q_OBJECT
 
 public:
-    explicit HttpServer(QObject* parent = nullptr);
+    explicit HttpServer(LogbookModel* model, QObject* parent = nullptr);
 
     // Start listening on the given port.  Returns false on bind failure
     // (port in use, permission denied, etc.).
@@ -39,7 +43,8 @@ private slots:
     void onNewConnection();
 
 private:
-    QTcpServer* m_server;
+    LogbookModel* m_model;     // not owned
+    QTcpServer*   m_server;
 };
 
 } // namespace ShackLog::Server
