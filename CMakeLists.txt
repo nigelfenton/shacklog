@@ -16,12 +16,15 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
 endif()
 
-# Qt 6.2+ for QSqlDatabase, QWebSocket, modern QString APIs
+# Qt 6.2+ for QSqlDatabase, QWebSocket, modern QString APIs.
+# Network is required by shacklog-server (QTcpServer); a Qt::Sql transitive
+# dep on most platforms but listed here for explicitness.
 find_package(Qt6 6.2 REQUIRED COMPONENTS
     Core
     Gui
     Widgets
     Sql
+    Network
     WebSockets
 )
 
@@ -118,4 +121,35 @@ if(APPLE)
         MACOSX_BUNDLE_BUNDLE_VERSION        "${PROJECT_VERSION}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING  "${PROJECT_VERSION}"
     )
+endif()
+
+# ────────────────────────────────────────────────────────────────────
+#  shacklog-server — headless web + N3FJP-compat server (Phase 0 spike)
+# ────────────────────────────────────────────────────────────────────
+# Target host is shack-hub (Linux); also built on Windows + macOS for
+# dev convenience.  No GUI/Widgets — QCoreApplication only.  Reuse of
+# the desktop's LogbookModel etc. lands in Phase 1; for now the spike
+# is self-contained under src/server/.
+set(SHACKLOG_SERVER_SOURCES
+    src/server/main.cpp
+    src/server/HttpServer.cpp
+    src/server/HttpServer.h
+    src/server/N3fjpServer.cpp
+    src/server/N3fjpServer.h
+)
+
+add_executable(shacklog-server ${SHACKLOG_SERVER_SOURCES})
+
+target_include_directories(shacklog-server PRIVATE src src/server)
+
+target_link_libraries(shacklog-server PRIVATE
+    Qt6::Core
+    Qt6::Network
+)
+
+if(MSVC)
+    target_compile_options(shacklog-server PRIVATE /W3 /permissive-)
+    target_compile_definitions(shacklog-server PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+else()
+    target_compile_options(shacklog-server PRIVATE -Wall -Wextra -Wpedantic)
 endif()
