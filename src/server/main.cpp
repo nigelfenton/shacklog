@@ -12,6 +12,7 @@
 
 #include "HttpServer.h"
 #include "N3fjpServer.h"
+#include "WsjtxAdifReceiver.h"
 #include "LogbookModel.h"
 
 #include <QCoreApplication>
@@ -67,9 +68,18 @@ int main(int argc, char* argv[])
     N3fjpServer n3fjp(&model);
     if (!n3fjp.start(n3fjpPort)) return 1;
 
+    // WSJT-X Secondary UDP Server receiver — shares port 1100 with the
+    // N3FJP TCP server (TCP/UDP are independent sockets).  Bind failure
+    // is non-fatal: log a warning but keep the rest of the server up.
+    WsjtxAdifReceiver wsjtx(&model);
+    if (!wsjtx.start(n3fjpPort)) {
+        qWarning() << "WsjtxAdifReceiver did not start — WSJT-X UDP log path disabled";
+    }
+
     qInfo() << "shacklog-server ready.";
-    qInfo() << "  HTTP   :" << QString("http://localhost:%1").arg(httpPort);
-    qInfo() << "  N3FJP  :" << QString("nc localhost %1").arg(n3fjpPort);
+    qInfo() << "  HTTP        :" << QString("http://localhost:%1").arg(httpPort);
+    qInfo() << "  N3FJP TCP   :" << QString("nc localhost %1").arg(n3fjpPort);
+    qInfo() << "  WSJT-X UDP  :" << QString("udp/%1 (Secondary UDP Server target)").arg(n3fjpPort);
     qInfo() << "Ctrl+C to stop.";
 
     return app.exec();
