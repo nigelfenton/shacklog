@@ -13,13 +13,50 @@
 #include <QUuid>
 #include <QVariant>
 #include <QDateTime>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 namespace ShackLog {
 
 namespace {
 
-constexpr int kCurrentSchemaVersion = 1;
+constexpr int kCurrentSchemaVersion = 2;
 const QString kAdifProgramId = "ShackLog";
+
+// Compact JSON snapshot of a QSO for the audit table.  Field names follow
+// the SQL column convention (snake_case) so audit rows can be reasoned
+// about against the schema directly.  Only non-empty / non-zero fields
+// are included to keep rows small.
+QString qsoSnapshotJson(const Qso& q) {
+    QJsonObject o;
+    o["id"] = static_cast<qint64>(q.id);
+    o["call"] = q.call;
+    o["qso_date"] = q.qsoDate;
+    o["time_on"] = q.timeOn;
+    if (!q.timeOff.isEmpty())     o["time_off"]     = q.timeOff;
+    if (!q.band.isEmpty())        o["band"]         = q.band;
+    if (q.freq > 0.0)             o["freq"]         = q.freq;
+    if (!q.mode.isEmpty())        o["mode"]         = q.mode;
+    if (!q.submode.isEmpty())     o["submode"]      = q.submode;
+    if (!q.rstSent.isEmpty())     o["rst_sent"]     = q.rstSent;
+    if (!q.rstRcvd.isEmpty())     o["rst_rcvd"]     = q.rstRcvd;
+    if (!q.name.isEmpty())        o["name"]         = q.name;
+    if (!q.qth.isEmpty())         o["qth"]          = q.qth;
+    if (!q.gridsquare.isEmpty())  o["gridsquare"]   = q.gridsquare;
+    if (q.dxcc)                   o["dxcc"]         = q.dxcc;
+    if (!q.country.isEmpty())     o["country"]      = q.country;
+    if (!q.state.isEmpty())       o["state"]        = q.state;
+    if (!q.contestId.isEmpty())   o["contest_id"]   = q.contestId;
+    if (q.srx)                    o["srx"]          = q.srx;
+    if (q.stx)                    o["stx"]          = q.stx;
+    if (!q.station.isEmpty())     o["station"]      = q.station;
+    if (!q.comment.isEmpty())     o["comment"]      = q.comment;
+    if (!q.notes.isEmpty())       o["notes"]        = q.notes;
+    if (!q.createdAt.isEmpty())   o["created_at"]   = q.createdAt;
+    if (!q.updatedAt.isEmpty())   o["updated_at"]   = q.updatedAt;
+    return QString::fromUtf8(
+        QJsonDocument(o).toJson(QJsonDocument::Compact));
+}
 
 QString fmtFreq(double mhz) {
     if (mhz <= 0.0) return {};
@@ -200,6 +237,61 @@ bool LogbookModel::migrateSchema()
         v = 1;
     }
 
+    // v1 → v2: multi-station awareness + soft-delete + audit trail.
+    // Introduced 2026-05-20 for shacklog-server (FD 2026 prep, design
+    // doc §6.5).  Desktop ShackLog is forward-compatible — the new
+    // columns are NULL for old rows and the desktop never reads them.
+    if (v < 2) {
+        QSqlQuery q{m_db};
+        if (!q.exec("ALTER TABLE qsos ADD COLUMN station TEXT")) {
+            m_lastError = q.lastError().text(); return false;
+        }
+        if (!q.exec("ALTER TABLE qsos ADD COLUMN deleted_at TEXT")) {
+            m_lastError = q.lastError().text(); return false;
+        }
+        // Fast dupe-check index (FD-rule dupe: call + band + mode).
+        if (!q.exec(
+                "CREATE INDEX IF NOT EXISTS idx_qsos_call_band_mode "
+                "ON qsos(call, band, mode)")) {
+            m_lastError = q.lastError().text(); return false;
+        }
+        // Live per-station heartbeat + BMF state (server use only;
+        // populated by the per-laptop Hamlib bridge daemon and updated
+        // on each browser /api/stations/{id}/bmf POST).
+        const char* createStations =
+            "CREATE TABLE IF NOT EXISTS stations ("
+            "  id          TEXT PRIMARY KEY,"
+            "  last_seen   TEXT,"
+            "  current_op  TEXT,"
+            "  band        TEXT,"
+            "  mode        TEXT,"
+            "  freq        REAL"
+            ")";
+        if (!q.exec(createStations)) {
+            m_lastError = q.lastError().text(); return false;
+        }
+        // Immutable audit trail.  Every insert / update / delete writes
+        // one row.  Used for contest-evening replay and FD post-mortems.
+        const char* createAudit =
+            "CREATE TABLE IF NOT EXISTS audit ("
+            "  id           INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  ts           TEXT NOT NULL DEFAULT (datetime('now')),"
+            "  qso_id       INTEGER,"
+            "  action       TEXT NOT NULL,"
+            "  actor        TEXT,"
+            "  before_json  TEXT,"
+            "  after_json   TEXT"
+            ")";
+        if (!q.exec(createAudit)) {
+            m_lastError = q.lastError().text(); return false;
+        }
+        if (!setSchemaVersion(2)) {
+            m_lastError = "could not set user_version to 2";
+            return false;
+        }
+        v = 2;
+    }
+
     if (v != kCurrentSchemaVersion) {
         m_lastError = QString("schema version %1 not understood (current=%2)")
                           .arg(v).arg(kCurrentSchemaVersion);
@@ -208,9 +300,33 @@ bool LogbookModel::migrateSchema()
     return true;
 }
 
+// ───────────────────────── audit helper ─────────────────────────
+
+// Appends one row to the audit table.  Failures are logged via
+// m_lastError but never abort the parent mutation — better to lose an
+// audit row than to lose a contest QSO.
+static bool writeAudit(QSqlDatabase& db,
+                       const QString& action,
+                       qint64 qsoId,
+                       const QString& actor,
+                       const QString& beforeJson,
+                       const QString& afterJson)
+{
+    QSqlQuery q{db};
+    q.prepare(
+        "INSERT INTO audit (qso_id, action, actor, before_json, after_json)"
+        " VALUES (:qso_id, :action, :actor, :before_json, :after_json)");
+    q.bindValue(":qso_id",      qsoId >= 0 ? QVariant(qsoId) : QVariant());
+    q.bindValue(":action",      action);
+    q.bindValue(":actor",       actor);
+    q.bindValue(":before_json", beforeJson.isEmpty() ? QVariant() : QVariant(beforeJson));
+    q.bindValue(":after_json",  afterJson.isEmpty()  ? QVariant() : QVariant(afterJson));
+    return q.exec();
+}
+
 // ───────────────────────── CRUD ─────────────────────────
 
-bool LogbookModel::insertQso(Qso& qso)
+bool LogbookModel::insertQso(Qso& qso, const QString& actor)
 {
     if (!m_db.isOpen()) { m_lastError = "db not open"; return false; }
     qso.call = qso.call.trimmed().toUpper();
@@ -224,6 +340,7 @@ bool LogbookModel::insertQso(Qso& qso)
         " name, qth, gridsquare, dxcc, country, state, cnty, cont, cqz, ituz,"
         " my_call, my_gridsquare, my_state, tx_pwr, my_operator,"
         " contest_id, srx, stx, srx_string, stx_string,"
+        " station,"
         " comment, notes,"
         " qsl_sent, qsl_rcvd, lotw_sent, lotw_rcvd, eqsl_sent, eqsl_rcvd,"
         " created_at, updated_at"
@@ -232,6 +349,7 @@ bool LogbookModel::insertQso(Qso& qso)
         " :name, :qth, :gridsquare, :dxcc, :country, :state, :cnty, :cont, :cqz, :ituz,"
         " :my_call, :my_gridsquare, :my_state, :tx_pwr, :my_operator,"
         " :contest_id, :srx, :stx, :srx_string, :stx_string,"
+        " :station,"
         " :comment, :notes,"
         " :qsl_sent, :qsl_rcvd, :lotw_sent, :lotw_rcvd, :eqsl_sent, :eqsl_rcvd,"
         " :created_at, :updated_at"
@@ -267,6 +385,7 @@ bool LogbookModel::insertQso(Qso& qso)
     q.bindValue(":stx", qso.stx);
     q.bindValue(":srx_string", qso.srxString);
     q.bindValue(":stx_string", qso.stxString);
+    q.bindValue(":station", qso.station);
     q.bindValue(":comment", qso.comment);
     q.bindValue(":notes", qso.notes);
     q.bindValue(":qsl_sent", qso.qslSent);
@@ -283,11 +402,13 @@ bool LogbookModel::insertQso(Qso& qso)
         return false;
     }
     qso.id = q.lastInsertId().toLongLong();
+    writeAudit(m_db, QStringLiteral("INSERT"), qso.id, actor,
+               QString(), qsoSnapshotJson(qso));
     emit qsoAdded(qso.id);
     return true;
 }
 
-bool LogbookModel::updateQso(const Qso& qsoIn)
+bool LogbookModel::updateQso(const Qso& qsoIn, const QString& actor)
 {
     if (!m_db.isOpen())   { m_lastError = "db not open"; return false; }
     if (qsoIn.id < 0)     { m_lastError = "qso id invalid"; return false; }
@@ -295,6 +416,9 @@ bool LogbookModel::updateQso(const Qso& qsoIn)
     Qso qso = qsoIn;
     qso.call = qso.call.trimmed().toUpper();
     qso.updatedAt = isoNowUtc();
+
+    // Snapshot the BEFORE state for the audit row.
+    const Qso before = getQso(qso.id);
 
     QSqlQuery q{m_db};
     q.prepare(
@@ -309,6 +433,7 @@ bool LogbookModel::updateQso(const Qso& qsoIn)
         " tx_pwr=:tx_pwr, my_operator=:my_operator,"
         " contest_id=:contest_id, srx=:srx, stx=:stx,"
         " srx_string=:srx_string, stx_string=:stx_string,"
+        " station=:station,"
         " comment=:comment, notes=:notes,"
         " qsl_sent=:qsl_sent, qsl_rcvd=:qsl_rcvd,"
         " lotw_sent=:lotw_sent, lotw_rcvd=:lotw_rcvd,"
@@ -347,6 +472,7 @@ bool LogbookModel::updateQso(const Qso& qsoIn)
     q.bindValue(":stx", qso.stx);
     q.bindValue(":srx_string", qso.srxString);
     q.bindValue(":stx_string", qso.stxString);
+    q.bindValue(":station", qso.station);
     q.bindValue(":comment", qso.comment);
     q.bindValue(":notes", qso.notes);
     q.bindValue(":qsl_sent", qso.qslSent);
@@ -361,20 +487,37 @@ bool LogbookModel::updateQso(const Qso& qsoIn)
         m_lastError = q.lastError().text();
         return false;
     }
+    writeAudit(m_db, QStringLiteral("UPDATE"), qso.id, actor,
+               qsoSnapshotJson(before), qsoSnapshotJson(qso));
     emit qsoUpdated(qso.id);
     return true;
 }
 
-bool LogbookModel::deleteQso(qint64 id)
+// Soft-delete: sets deleted_at instead of removing the row.  Once set,
+// the row is invisible to queryQsos / countQsos / getQso / isDuplicate
+// but the audit trail and row contents are preserved forever.  Hard
+// purges (if ever needed) must be done by an explicit admin tool, not
+// by accidental clicks during a contest.
+bool LogbookModel::deleteQso(qint64 id, const QString& actor)
 {
     if (!m_db.isOpen()) { m_lastError = "db not open"; return false; }
+
+    const Qso before = getQso(id);
+    if (before.id < 0) {
+        m_lastError = QString("no live qso with id %1").arg(id);
+        return false;
+    }
+
     QSqlQuery q{m_db};
-    q.prepare("DELETE FROM qsos WHERE id = :id");
+    q.prepare("UPDATE qsos SET deleted_at = :ts, updated_at = :ts WHERE id = :id");
+    q.bindValue(":ts", isoNowUtc());
     q.bindValue(":id", id);
     if (!q.exec()) {
         m_lastError = q.lastError().text();
         return false;
     }
+    writeAudit(m_db, QStringLiteral("DELETE"), id, actor,
+               qsoSnapshotJson(before), QString());
     emit qsoDeleted(id);
     return true;
 }
@@ -385,7 +528,9 @@ Qso LogbookModel::getQso(qint64 id, bool* ok) const
     Qso q;
     if (!m_db.isOpen()) return q;
     QSqlQuery sel{m_db};
-    sel.prepare("SELECT * FROM qsos WHERE id = :id");
+    // Soft-deleted rows are invisible by default.  Use the audit table
+    // if forensic access to a deleted QSO's content is needed.
+    sel.prepare("SELECT * FROM qsos WHERE id = :id AND deleted_at IS NULL");
     sel.bindValue(":id", id);
     if (!sel.exec() || !sel.next()) return q;
     q = qsoFromRow(sel);
@@ -395,7 +540,11 @@ Qso LogbookModel::getQso(qint64 id, bool* ok) const
 
 QString LogbookModel::filterToSql(const LogbookFilter& filter, QVariantList* binds) const
 {
+    // Soft-deleted rows are always filtered out — there's no caller-facing
+    // way to ask for them through LogbookFilter (deliberate: forensic
+    // queries should go through audit, not the live API).
     QStringList where;
+    where << "deleted_at IS NULL";
     if (!filter.text.isEmpty()) {
         where << "(call LIKE ? OR name LIKE ? OR qth LIKE ? OR gridsquare LIKE ? OR comment LIKE ?)";
         const QString pat = "%" + filter.text + "%";
@@ -413,7 +562,6 @@ QString LogbookModel::filterToSql(const LogbookFilter& filter, QVariantList* bin
     }
     if (!filter.dateFrom.isEmpty()) { where << "qso_date >= ?"; binds->append(filter.dateFrom); }
     if (!filter.dateTo.isEmpty())   { where << "qso_date <= ?"; binds->append(filter.dateTo);   }
-    if (where.isEmpty()) return {};
     return " WHERE " + where.join(" AND ");
 }
 
@@ -462,6 +610,7 @@ bool LogbookModel::isDuplicate(const QString& call,
         "SELECT 1 FROM qsos"
         " WHERE call = :call AND band = :band AND mode = :mode"
         "   AND created_at >= :cutoff"
+        "   AND deleted_at IS NULL"
         " LIMIT 1"
     );
     q.bindValue(":call", call.trimmed().toUpper());
@@ -511,6 +660,7 @@ Qso LogbookModel::qsoFromRow(QSqlQuery& q)
     o.stx          = i("stx");
     o.srxString    = s("srx_string");
     o.stxString    = s("stx_string");
+    o.station      = s("station");
     o.comment      = s("comment");
     o.notes        = s("notes");
     o.qslSent      = s("qsl_sent");

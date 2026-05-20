@@ -58,6 +58,9 @@ struct Qso {
     QString srxString;
     QString stxString;
 
+    // ── Multi-station (server only — added in schema v2) ───────────────
+    QString station;                     // e.g. "STN-1"; empty for non-FD use
+
     // ── Notes ─────────────────────────────────────────────────────────
     QString comment;
     QString notes;

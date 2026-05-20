@@ -55,9 +55,12 @@ public:
     QString errorString()  const { return m_lastError; }
 
     // ── CRUD ──────────────────────────────────────────────────────────
-    bool insertQso(Qso& qso);            // assigns id + stamps timestamps
-    bool updateQso(const Qso& qso);
-    bool deleteQso(qint64 id);
+    // The `actor` argument (schema v2+) names whoever caused this mutation
+    // for the audit log — "desktop", "http-api", "n3fjp:WSJT-X", a station
+    // ID, etc.  Default keeps the desktop's call sites working unchanged.
+    bool insertQso(Qso& qso, const QString& actor = QStringLiteral("system"));
+    bool updateQso(const Qso& qso, const QString& actor = QStringLiteral("system"));
+    bool deleteQso(qint64 id, const QString& actor = QStringLiteral("system"));
     Qso  getQso(qint64 id, bool* ok = nullptr) const;
 
     QVector<Qso> queryQsos(const LogbookFilter& filter = {}) const;

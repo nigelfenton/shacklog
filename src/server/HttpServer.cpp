@@ -5,6 +5,7 @@
 
 #include <QByteArray>
 #include <QDebug>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -16,42 +17,73 @@ namespace ShackLog::Server {
 
 namespace {
 
-// Build a minimal HTTP/1.1 response.  No keep-alive, no chunked, no TLS —
-// the spike asks for nothing more.
+// ───────────────────────── HTTP helpers ─────────────────────────
+
 QByteArray buildResponse(int status,
                          const QByteArray& reason,
                          const QByteArray& contentType,
                          const QByteArray& body)
 {
     QByteArray r;
-    r.reserve(128 + body.size());
+    r.reserve(160 + body.size());
     r += "HTTP/1.1 " + QByteArray::number(status) + ' ' + reason + "\r\n";
     r += "Content-Type: " + contentType + "\r\n";
     r += "Content-Length: " + QByteArray::number(body.size()) + "\r\n";
     r += "Connection: close\r\n";
-    r += "Server: ShackLog/0.1 (phase-1a)\r\n";
+    r += "Server: ShackLog/0.1 (phase-1b)\r\n";
     r += "\r\n";
     r += body;
     return r;
 }
 
-// Parse just enough of the request line to dispatch on method + path.
-// Returns (method, fullPath_with_query).
-static std::pair<QByteArray, QByteArray>
-parseRequestLine(const QByteArray& raw)
+QByteArray jsonResp(int status, const QByteArray& reason, const QJsonObject& obj)
 {
-    const int eol = raw.indexOf("\r\n");
-    if (eol < 0) return {{}, {}};
-    const QByteArray line = raw.left(eol);
-    const int sp1 = line.indexOf(' ');
-    if (sp1 < 0) return {{}, {}};
-    const int sp2 = line.indexOf(' ', sp1 + 1);
-    if (sp2 < 0) return {{}, {}};
-    return { line.mid(0, sp1), line.mid(sp1 + 1, sp2 - sp1 - 1) };
+    return buildResponse(status, reason, "application/json",
+                         QJsonDocument(obj).toJson(QJsonDocument::Compact));
 }
 
-// Serialise a Qso to JSON.  Field names follow ADIF lowercase to match
-// the column naming convention in LogbookModel.
+QByteArray jsonError(int status, const QByteArray& reason, const QString& msg)
+{
+    QJsonObject o;
+    o["error"] = msg;
+    return jsonResp(status, reason, o);
+}
+
+// Parse one HTTP request — request line + headers — from `raw` up to the
+// blank line at `hdrEnd`.  Header keys are lower-cased for easy lookup.
+struct ParsedRequest {
+    QByteArray method;
+    QByteArray fullPath;   // path with optional ?query
+    QHash<QString, QString> headers;
+};
+
+ParsedRequest parseHead(const QByteArray& raw, int hdrEnd)
+{
+    ParsedRequest p;
+    const QByteArray head = raw.left(hdrEnd);
+    const QList<QByteArray> lines = head.split('\n');
+    if (lines.isEmpty()) return p;
+    const QByteArray reqLine = lines.first().trimmed();
+    const int sp1 = reqLine.indexOf(' ');
+    const int sp2 = sp1 >= 0 ? reqLine.indexOf(' ', sp1 + 1) : -1;
+    if (sp1 >= 0 && sp2 >= 0) {
+        p.method   = reqLine.left(sp1);
+        p.fullPath = reqLine.mid(sp1 + 1, sp2 - sp1 - 1);
+    }
+    for (int i = 1; i < lines.size(); ++i) {
+        const QByteArray line = lines.at(i).trimmed();
+        if (line.isEmpty()) continue;
+        const int colon = line.indexOf(':');
+        if (colon <= 0) continue;
+        const QString name  = QString::fromLatin1(line.left(colon)).trimmed().toLower();
+        const QString value = QString::fromLatin1(line.mid(colon + 1)).trimmed();
+        p.headers.insert(name, value);
+    }
+    return p;
+}
+
+// ───────────────────────── Qso ↔ JSON ─────────────────────────
+
 QJsonObject qsoToJson(const Qso& q)
 {
     QJsonObject o;
@@ -73,6 +105,9 @@ QJsonObject qsoToJson(const Qso& q)
     if (!q.country.isEmpty())     o["country"]      = q.country;
     if (!q.state.isEmpty())       o["state"]        = q.state;
     if (!q.contestId.isEmpty())   o["contest_id"]   = q.contestId;
+    if (q.srx)                    o["srx"]          = q.srx;
+    if (q.stx)                    o["stx"]          = q.stx;
+    if (!q.station.isEmpty())     o["station"]      = q.station;
     if (!q.myCall.isEmpty())      o["my_call"]      = q.myCall;
     if (q.txPwr > 0.0)            o["tx_pwr"]       = q.txPwr;
     if (!q.comment.isEmpty())     o["comment"]      = q.comment;
@@ -82,7 +117,74 @@ QJsonObject qsoToJson(const Qso& q)
     return o;
 }
 
+// Construct a Qso from JSON.  Required fields:
+//   call, qso_date (YYYYMMDD), time_on (HHMM or HHMMSS), band, mode
+// Anything else is optional.  `missing` collects the names of any required
+// fields that were absent, so the caller can return a useful 400 body.
+Qso qsoFromJson(const QJsonObject& o, QStringList& missing)
+{
+    Qso q;
+    auto needStr = [&](const char* k, QString& dst) {
+        const QJsonValue v = o.value(QString::fromLatin1(k));
+        if (!v.isString() || v.toString().trimmed().isEmpty()) {
+            missing << QString::fromLatin1(k);
+        } else {
+            dst = v.toString().trimmed();
+        }
+    };
+    auto optStr = [&](const char* k, QString& dst) {
+        const QJsonValue v = o.value(QString::fromLatin1(k));
+        if (v.isString()) dst = v.toString();
+    };
+    auto optInt = [&](const char* k, int& dst) {
+        const QJsonValue v = o.value(QString::fromLatin1(k));
+        if (v.isDouble()) dst = v.toInt();
+    };
+    auto optDouble = [&](const char* k, double& dst) {
+        const QJsonValue v = o.value(QString::fromLatin1(k));
+        if (v.isDouble()) dst = v.toDouble();
+    };
+
+    needStr("call",     q.call);
+    needStr("qso_date", q.qsoDate);
+    needStr("time_on",  q.timeOn);
+    needStr("band",     q.band);
+    needStr("mode",     q.mode);
+
+    optStr ("time_off",     q.timeOff);
+    optDouble("freq",       q.freq);
+    optStr ("submode",      q.submode);
+    optStr ("rst_sent",     q.rstSent);
+    optStr ("rst_rcvd",     q.rstRcvd);
+    optStr ("name",         q.name);
+    optStr ("qth",          q.qth);
+    optStr ("gridsquare",   q.gridsquare);
+    optInt ("dxcc",         q.dxcc);
+    optStr ("country",      q.country);
+    optStr ("state",        q.state);
+    optStr ("cnty",         q.cnty);
+    optStr ("cont",         q.cont);
+    optInt ("cqz",          q.cqz);
+    optInt ("ituz",         q.ituz);
+    optStr ("my_call",      q.myCall);
+    optStr ("my_gridsquare",q.myGridsquare);
+    optStr ("my_state",     q.myState);
+    optDouble("tx_pwr",     q.txPwr);
+    optStr ("my_operator",  q.myOperator);
+    optStr ("contest_id",   q.contestId);
+    optInt ("srx",          q.srx);
+    optInt ("stx",          q.stx);
+    optStr ("srx_string",   q.srxString);
+    optStr ("stx_string",   q.stxString);
+    optStr ("station",      q.station);
+    optStr ("comment",      q.comment);
+    optStr ("notes",        q.notes);
+    return q;
+}
+
 } // namespace
+
+// ───────────────────────── HttpServer ─────────────────────────
 
 HttpServer::HttpServer(LogbookModel* model, QObject* parent)
     : QObject(parent)
@@ -114,26 +216,47 @@ void HttpServer::onNewConnection()
                 client, &QTcpSocket::deleteLater);
 
         connect(client, &QTcpSocket::readyRead, client, [client, this] {
-            const QByteArray raw = client->readAll();
-            const auto [method, fullPath] = parseRequestLine(raw);
+            // Accumulate incoming bytes on the socket via a dynamic property
+            // so we can wait for the full body (POST may arrive in pieces).
+            QByteArray buf = client->property("buf").toByteArray();
+            buf += client->readAll();
 
-            // Split path and query.  QUrl handles the parsing for us.
-            const QUrl url(QString::fromUtf8(fullPath));
+            const int hdrEnd = buf.indexOf("\r\n\r\n");
+            if (hdrEnd < 0) {
+                client->setProperty("buf", buf);  // header still incomplete
+                return;
+            }
+
+            const ParsedRequest req = parseHead(buf, hdrEnd);
+            const int  bodyStart    = hdrEnd + 4;
+            const int  contentLen   = req.headers.value("content-length", "0").toInt();
+            const int  haveBody     = buf.size() - bodyStart;
+            if (haveBody < contentLen) {
+                client->setProperty("buf", buf);  // body still incomplete
+                return;
+            }
+            const QByteArray body = buf.mid(bodyStart, contentLen);
+            client->setProperty("buf", QByteArray());  // request complete
+
+            // Dispatch.
+            const QUrl   url(QString::fromUtf8(req.fullPath));
             const QString path = url.path();
             const QUrlQuery qs(url);
 
             QByteArray response;
 
-            if (method == "GET" && path == "/") {
+            // ─── GET / ───
+            if (req.method == "GET" && path == "/") {
                 response = buildResponse(
                     200, "OK", "text/plain; charset=utf-8",
                     "ShackLog Server alive\n");
             }
-            else if (method == "GET" && path == "/api/state") {
+            // ─── GET /api/state ───
+            else if (req.method == "GET" && path == "/api/state") {
                 QJsonObject state;
                 state["status"]   = "alive";
-                state["version"]  = "0.1.0-phase1a";
-                state["phase"]    = QStringLiteral("1a");
+                state["version"]  = "0.1.0-phase1b";
+                state["phase"]    = QStringLiteral("1b");
                 if (m_model && m_model->isOpen()) {
                     state["db_path"]   = m_model->databasePath();
                     state["qso_count"] = m_model->countQsos();
@@ -142,21 +265,18 @@ void HttpServer::onNewConnection()
                     state["qso_count"] = 0;
                     state["db_error"]  = "logbook not open";
                 }
-                response = buildResponse(
-                    200, "OK", "application/json",
-                    QJsonDocument(state).toJson(QJsonDocument::Compact));
+                response = jsonResp(200, "OK", state);
             }
-            else if (method == "GET" && path == "/api/qsos") {
+            // ─── GET /api/qsos ───
+            else if (req.method == "GET" && path == "/api/qsos") {
                 if (!m_model || !m_model->isOpen()) {
-                    response = buildResponse(
-                        503, "Service Unavailable", "application/json",
-                        R"({"error":"logbook not open"})");
+                    response = jsonError(503, "Service Unavailable",
+                                         QStringLiteral("logbook not open"));
                 } else {
                     LogbookFilter f;
                     bool ok = false;
                     const int lim = qs.queryItemValue("limit").toInt(&ok);
                     f.limit = (ok && lim > 0) ? qMin(lim, 1000) : 50;
-
                     const auto rows = m_model->queryQsos(f);
                     QJsonArray arr;
                     for (const auto& q : rows) arr.append(qsoToJson(q));
@@ -164,16 +284,51 @@ void HttpServer::onNewConnection()
                     body["count"] = static_cast<int>(rows.size());
                     body["limit"] = f.limit;
                     body["qsos"]  = arr;
-                    response = buildResponse(
-                        200, "OK", "application/json",
-                        QJsonDocument(body).toJson(QJsonDocument::Compact));
+                    response = jsonResp(200, "OK", body);
                 }
             }
+            // ─── POST /api/qsos ───
+            else if (req.method == "POST" && path == "/api/qsos") {
+                if (!m_model || !m_model->isOpen()) {
+                    response = jsonError(503, "Service Unavailable",
+                                         QStringLiteral("logbook not open"));
+                } else {
+                    QJsonParseError perr;
+                    const QJsonDocument doc =
+                        QJsonDocument::fromJson(body, &perr);
+                    if (perr.error != QJsonParseError::NoError ||
+                        !doc.isObject()) {
+                        response = jsonError(
+                            400, "Bad Request",
+                            QStringLiteral("invalid JSON: %1").arg(perr.errorString()));
+                    } else {
+                        QStringList missing;
+                        Qso q = qsoFromJson(doc.object(), missing);
+                        if (!missing.isEmpty()) {
+                            response = jsonError(
+                                400, "Bad Request",
+                                QStringLiteral("missing required field(s): %1")
+                                    .arg(missing.join(", ")));
+                        } else if (!m_model->insertQso(q, QStringLiteral("http-api"))) {
+                            response = jsonError(
+                                500, "Internal Server Error",
+                                m_model->errorString());
+                        } else {
+                            QJsonObject ok;
+                            ok["status"] = "created";
+                            ok["qso"]    = qsoToJson(q);
+                            response = jsonResp(201, "Created", ok);
+                        }
+                    }
+                }
+            }
+            // ─── 404 ───
             else {
                 response = buildResponse(
                     404, "Not Found", "text/plain; charset=utf-8",
                     "Not Found\n");
             }
+
             client->write(response);
             client->disconnectFromHost();
         });
