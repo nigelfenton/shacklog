@@ -30,7 +30,7 @@ QByteArray buildResponse(int status,
     r += "Content-Type: " + contentType + "\r\n";
     r += "Content-Length: " + QByteArray::number(body.size()) + "\r\n";
     r += "Connection: close\r\n";
-    r += "Server: ShackLog/0.1 (phase-1b)\r\n";
+    r += "Server: ShackLog/0.1 (phase-1c)\r\n";
     r += "\r\n";
     r += body;
     return r;
@@ -255,8 +255,8 @@ void HttpServer::onNewConnection()
             else if (req.method == "GET" && path == "/api/state") {
                 QJsonObject state;
                 state["status"]   = "alive";
-                state["version"]  = "0.1.0-phase1b";
-                state["phase"]    = QStringLiteral("1b");
+                state["version"]  = "0.1.0-phase1c";
+                state["phase"]    = QStringLiteral("1c");
                 if (m_model && m_model->isOpen()) {
                     state["db_path"]   = m_model->databasePath();
                     state["qso_count"] = m_model->countQsos();

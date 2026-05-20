@@ -22,7 +22,7 @@ int main(int argc, char* argv[])
 {
     QCoreApplication app(argc, argv);
     QCoreApplication::setApplicationName("shacklog-server");
-    QCoreApplication::setApplicationVersion("0.1.0-phase1a");
+    QCoreApplication::setApplicationVersion("0.1.0-phase1c");
     QCoreApplication::setOrganizationName("G0JKN");
 
     QCommandLineParser cli;
@@ -64,7 +64,7 @@ int main(int argc, char* argv[])
     HttpServer http(&model);
     if (!http.start(httpPort)) return 1;
 
-    N3fjpServer n3fjp;
+    N3fjpServer n3fjp(&model);
     if (!n3fjp.start(n3fjpPort)) return 1;
 
     qInfo() << "shacklog-server ready.";

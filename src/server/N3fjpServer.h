@@ -1,16 +1,22 @@
 #pragma once
 
-// Phase-0 spike N3FJP-protocol-compatible TCP server.
+// N3FJP-protocol-compatible TCP server.
 //
-// Listens on port 1100 (the N3FJP default) and parses <CMD>...</CMD>
-// envelopes.  For the spike we implement just ONE command — <PROGRAM> —
-// returning a correctly-shaped <PROGRAMRESPONSE> that explicitly identifies
-// this as "ShackLog" with an "N3FJP-compat" API version label (never as
-// N3FJP itself — see design doc §13 ethical posture).
+// Listens on port 1100 (the N3FJP default).  Speaks the N3FJP TCP/XML
+// command envelope per the cached spec at:
+//   \\MYCLOUDEX2ULTRA\nigel\documents\_claude\api\n3fjp\n3fjp-api-spec-2026-05-20.md
 //
-// Phase 1 will extend the dispatcher to the FD-minimum command subset
-// (<APIVER>, <READBMF>, <UPDATEANDLOG>, <SETUPDATESTATE>, <ENTEREVENT> push,
-// etc., per design doc §6.2).
+// Identifies as "ShackLog" with an explicit "N3FJP-compat-<X>" label —
+// NEVER as N3FJP itself.  Clean-room from the public spec only.  See
+// design doc §13 ethical posture.
+//
+// Phase 1c implemented commands:
+//   <PROGRAM>         — identity
+//   <APIVER>          — API version
+//   <UPDATEANDLOG>    — log a QSO (the WSJT-X path)
+//
+// Phase 1d will add: <SETUPDATESTATE>, <ENTEREVENT> push, <READBMF>,
+// <QSOINPROGRESS>, <GETCALLQTHINFO>, <DUPECHECK>.
 
 #include <QObject>
 #include <QString>
@@ -18,13 +24,17 @@
 
 class QTcpSocket;
 
+namespace ShackLog {
+class LogbookModel;
+}
+
 namespace ShackLog::Server {
 
 class N3fjpServer : public QObject {
     Q_OBJECT
 
 public:
-    explicit N3fjpServer(QObject* parent = nullptr);
+    explicit N3fjpServer(LogbookModel* model, QObject* parent = nullptr);
 
     bool start(quint16 port = 1100);
 
@@ -37,10 +47,14 @@ private slots:
 
 private:
     // Parse + dispatch one CR+LF-terminated frame.  Returns the response
-    // to send (empty == no response for this frame).
-    QString handleFrame(const QString& frame) const;
+    // to send (empty == no response, e.g. silent success on UPDATEANDLOG).
+    QString handleFrame(const QString& frame, const QString& clientId);
 
-    QTcpServer* m_server;
+    // Per-command handlers (return the response envelope or empty).
+    QString handleUpdateAndLog(const QString& inner, const QString& clientId);
+
+    LogbookModel* m_model;     // not owned
+    QTcpServer*   m_server;
 };
 
 } // namespace ShackLog::Server
