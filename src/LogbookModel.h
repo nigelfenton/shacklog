@@ -18,6 +18,7 @@
 #include "Qso.h"
 
 #include <QObject>
+#include <QSet>
 #include <QString>
 #include <QSqlDatabase>
 #include <QVariantList>
@@ -50,6 +51,9 @@ public:
     // Open or create the logbook database.  If `path` is empty, defaults to
     //   <AppLocalDataLocation>/shacklog.sqlite
     bool open(const QString& path = {});
+    // Close the database and release the connection so open() can be called
+    // again on a different file (multi-log operator switching).
+    void close();
     bool isOpen() const { return m_db.isOpen(); }
     QString databasePath() const { return m_db.databaseName(); }
     QString errorString()  const { return m_lastError; }
@@ -81,6 +85,22 @@ public:
     double  defaultTxPwr() const;
     bool    contestMode() const       { return settingValue("CONTEST_MODE") == "1"; }
     QString contestId() const         { return settingValue("CONTEST_ID"); }
+
+    // ── Awards ────────────────────────────────────────────────────────
+    // One-pass scan of the whole log for award-relevant distinct sets.
+    // "Confirmed" = LoTW or QSL card received (eQSL is not accepted for
+    // ARRL awards).  WAS is validated against the real 50-state list with
+    // the ARRL rule that DC counts as MD; out-of-list values are reported
+    // in wasBogus rather than silently counted.
+    struct AwardsSummary {
+        int qsoCount{0};
+        QSet<int>     dxccWorked, dxccConfirmed;
+        QSet<QString> wasWorked,  wasConfirmed, wasBogus;
+        QSet<QString> wacWorked,  wacConfirmed;
+        QSet<int>     wazWorked,  wazConfirmed;
+        QSet<QString> gridsWorked;            // 4-char squares, any band
+    };
+    AwardsSummary awardsSummary() const;
 
     // ── Import ────────────────────────────────────────────────────────
     struct AdifImportResult {

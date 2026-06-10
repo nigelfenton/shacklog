@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 
+#include "AwardsDialog.h"
 #include "LogbookModel.h"
 #include "TciClient.h"
 #include "EditDialog.h"
@@ -19,7 +20,11 @@
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDateTime>
+#include <QDir>
 #include <QFileDialog>
+#include <QInputDialog>
+#include <QRegularExpression>
+#include <QSettings>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -95,6 +100,43 @@ QString askSavePath(QWidget* parent, const QString& title, const QString& filter
     return QFileDialog::getSaveFileName(parent, title, dir + "/" + defaultName, filter);
 }
 
+// ── Multi-log store ────────────────────────────────────────────────────
+// One SQLite file per operator callsign — shacklog-<CALL>.sqlite in the
+// app-data dir.  The pre-multi-log single shacklog.sqlite is adopted
+// (renamed) for the first callsign entered after upgrading.
+
+QString logsDirPath()
+{
+    const QString dir =
+        QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    QDir{}.mkpath(dir);
+    return dir;
+}
+
+QString callToLogFile(QString call)
+{
+    call = call.toUpper();
+    call.replace(QRegularExpression(QStringLiteral("[^A-Z0-9]")),
+                 QStringLiteral("_"));          // G0JKN/P → G0JKN_P
+    return logsDirPath() + QStringLiteral("/shacklog-") + call
+         + QStringLiteral(".sqlite");
+}
+
+QStringList existingLogCalls()
+{
+    QStringList calls;
+    const QDir dir(logsDirPath());
+    const auto files = dir.entryList({QStringLiteral("shacklog-*.sqlite")},
+                                     QDir::Files, QDir::Name);
+    for (const QString& f : files) {
+        QString call = f;
+        call.remove(0, QStringLiteral("shacklog-").size());
+        call.chop(QStringLiteral(".sqlite").size());
+        if (!call.isEmpty()) calls << call;
+    }
+    return calls;
+}
+
 } // namespace
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -111,7 +153,7 @@ MainWindow::MainWindow(QWidget* parent)
     setWindowTitle("ShackLog");
     resize(1200, 700);
 
-    if (!m_model->open()) {
+    if (!chooseAndOpenLog(/*startup*/ true)) {
         QMessageBox::critical(this, "ShackLog",
                               QString("Could not open logbook database:\n%1")
                                   .arg(m_model->errorString()));
@@ -208,6 +250,8 @@ MainWindow::~MainWindow() = default;
 void MainWindow::buildMenus()
 {
     auto* fileMenu = menuBar()->addMenu("&File");
+    m_actSwitchLog = fileMenu->addAction("Switch &Operator / Log…", this, &MainWindow::onSwitchLog);
+    fileMenu->addSeparator();
     m_actImportAdif = fileMenu->addAction("&Import ADIF…", this, &MainWindow::onImportAdif);
     fileMenu->addSeparator();
     m_actExportAdif = fileMenu->addAction("Export &ADIF…", this, &MainWindow::onExportAdif);
@@ -224,6 +268,7 @@ void MainWindow::buildMenus()
 
     auto* toolsMenu = menuBar()->addMenu("&Tools");
     m_actSettings      = toolsMenu->addAction("&Settings…", this, &MainWindow::onSettings);
+    m_actAwards        = toolsMenu->addAction("&Awards…", this, &MainWindow::onShowAwards);
     toolsMenu->addSeparator();
     m_actConnectTci    = toolsMenu->addAction("&Connect TCI",    this, &MainWindow::onConnectTci);
     m_actDisconnectTci = toolsMenu->addAction("&Disconnect TCI", this, &MainWindow::onDisconnectTci);
@@ -821,6 +866,75 @@ void MainWindow::onSettings()
         applyPotaConfigFromSettings();
         refreshStatusBar();
     }
+}
+
+bool MainWindow::chooseAndOpenLog(bool startup)
+{
+    QSettings settings;
+    const QString last = settings.value("lastOperator").toString().toUpper();
+
+    QStringList calls = existingLogCalls();
+    calls.removeAll(last);
+    if (!last.isEmpty()) calls.prepend(last);    // last-used = default choice
+
+    bool ok = false;
+    QString call = QInputDialog::getItem(
+        this, "ShackLog — Operator",
+        "Operator callsign (pick an existing log, or type a\n"
+        "new callsign to start a fresh one):",
+        calls, 0, /*editable*/ true, &ok).trimmed().toUpper();
+
+    if (!ok || call.isEmpty()) {
+        if (!startup) return false;              // live switch cancelled: keep current
+        call = last;
+        if (call.isEmpty())
+            return m_model->open();              // first run, cancelled: legacy behaviour
+    }
+
+    const QString path = callToLogFile(call);
+
+    // Adopt the pre-multi-log single logbook for the first operator.
+    const QString legacy = logsDirPath() + "/shacklog.sqlite";
+    if (!QFile::exists(path) && QFile::exists(legacy)
+        && existingLogCalls().isEmpty()) {
+        const auto ans = QMessageBox::question(
+            this, "Adopt existing logbook?",
+            QString("An existing logbook from before multi-log support was "
+                    "found.\n\nAdopt it as %1's log?\n\n(No starts %1 with an "
+                    "empty log; the old file is kept untouched.)").arg(call));
+        if (ans == QMessageBox::Yes) {
+            if (m_model->isOpen()) m_model->close();
+            QFile::rename(legacy, path);
+        }
+    }
+
+    if (!m_model->open(path)) {
+        QMessageBox::critical(this, "ShackLog",
+                              QString("Could not open logbook for %1:\n%2")
+                                  .arg(call, m_model->errorString()));
+        return false;
+    }
+    if (m_model->myCall().isEmpty())
+        m_model->setSetting("MY_CALL", call);    // seed a fresh log's identity
+    m_operatorCall = call;
+    settings.setValue("lastOperator", call);
+    setWindowTitle(QString("ShackLog — %1").arg(call));
+    return true;
+}
+
+void MainWindow::onSwitchLog()
+{
+    if (!chooseAndOpenLog(/*startup*/ false)) return;
+    refreshTable();
+    refreshStatusBar();
+}
+
+void MainWindow::onShowAwards()
+{
+    if (!m_model || !m_model->isOpen()) return;
+    AwardsDialog dlg(m_model, m_operatorCall.isEmpty()
+                                  ? m_model->myCall() : m_operatorCall, this);
+    dlg.exec();
 }
 
 void MainWindow::onImportAdif()

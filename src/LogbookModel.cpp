@@ -124,6 +124,8 @@ bool LogbookModel::open(const QString& path)
         QDir{}.mkpath(QFileInfo{dbPath}.absolutePath());
     }
 
+    if (m_db.isValid()) close();   // re-open on a different file (log switching)
+
     m_db = QSqlDatabase::addDatabase("QSQLITE", m_connectionName);
     m_db.setDatabaseName(dbPath);
     if (!m_db.open()) {
@@ -709,6 +711,76 @@ double LogbookModel::defaultTxPwr() const
     bool ok = false;
     const double v = settingValue("DEFAULT_TX_PWR").toDouble(&ok);
     return ok ? v : 0.0;
+}
+
+void LogbookModel::close()
+{
+    if (m_db.isOpen()) m_db.close();
+    m_db = QSqlDatabase();                       // drop our handle first
+    QSqlDatabase::removeDatabase(m_connectionName);
+}
+
+// ───────────────────────── Awards ─────────────────────────
+
+LogbookModel::AwardsSummary LogbookModel::awardsSummary() const
+{
+    AwardsSummary a;
+    if (!m_db.isOpen()) return a;
+
+    static const QSet<QString> kStates = {
+        "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA",
+        "HI","ID","IL","IN","IA","KS","KY","LA","ME","MD",
+        "MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
+        "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC",
+        "SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"};
+    static const QSet<QString> kConts = {"NA","SA","EU","AF","AS","OC"};
+    // WAS counts contacts with the 50 states; the relevant DXCC entities
+    // are Continental US (291), Alaska (6) and Hawaii (110).
+    static const QSet<int> kUsaDxcc = {291, 6, 110};
+
+    QSqlQuery q(m_db);
+    if (!q.exec("SELECT dxcc, state, cont, cqz, gridsquare,"
+                " lotw_rcvd, qsl_rcvd FROM qsos"))
+        return a;
+
+    while (q.next()) {
+        ++a.qsoCount;
+        const bool conf = q.value(5).toString() == QLatin1String("Y")
+                       || q.value(6).toString() == QLatin1String("Y");
+
+        const int dxcc = q.value(0).toInt();
+        if (dxcc > 0) {
+            a.dxccWorked.insert(dxcc);
+            if (conf) a.dxccConfirmed.insert(dxcc);
+        }
+
+        QString st = q.value(1).toString().trimmed().toUpper();
+        if (!st.isEmpty() && kUsaDxcc.contains(dxcc)) {
+            if (st == QLatin1String("DC")) st = QStringLiteral("MD");  // ARRL WAS rule
+            if (kStates.contains(st)) {
+                a.wasWorked.insert(st);
+                if (conf) a.wasConfirmed.insert(st);
+            } else {
+                a.wasBogus.insert(st);
+            }
+        }
+
+        const QString ct = q.value(2).toString().trimmed().toUpper();
+        if (kConts.contains(ct)) {
+            a.wacWorked.insert(ct);
+            if (conf) a.wacConfirmed.insert(ct);
+        }
+
+        const int z = q.value(3).toInt();
+        if (z >= 1 && z <= 40) {
+            a.wazWorked.insert(z);
+            if (conf) a.wazConfirmed.insert(z);
+        }
+
+        const QString g = q.value(4).toString().trimmed().toUpper().left(4);
+        if (g.size() == 4) a.gridsWorked.insert(g);
+    }
+    return a;
 }
 
 // ───────────────────────── ADIF import ─────────────────────────

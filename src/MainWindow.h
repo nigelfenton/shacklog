@@ -57,6 +57,8 @@ private slots:
     void onEditQso();
     void onDeleteQso();
     void onSettings();
+    void onSwitchLog();
+    void onShowAwards();
     void onImportAdif();
     void onExportAdif();
     void onExportCabrillo();
@@ -88,6 +90,10 @@ private:
     void refreshQuickEntry();
     void refreshContestUI();
     void refreshTable();
+    // Operator chooser: pick / create the per-callsign log and (re)open it.
+    // At startup a cancel falls back to the last-used (or legacy) log; on a
+    // live switch a cancel keeps the current log open.
+    bool chooseAndOpenLog(bool startup);
     void populateBandFilter();
     void populateModeFilter();
     void populateContestFilter();
@@ -119,6 +125,7 @@ private:
     // operator's typed input (must be left alone).
     QString m_lastAutofilledCall;
     QString m_lastAutofilledComment;
+    QString m_operatorCall;          // whose log is open (multi-log)
 
     // Header
     QLabel*  m_myCallLabel{};
@@ -164,6 +171,8 @@ private:
     QLabel* m_sbDb{};
 
     // Menu actions
+    QAction* m_actSwitchLog{};
+    QAction* m_actAwards{};
     QAction* m_actImportAdif{};
     QAction* m_actExportAdif{};
     QAction* m_actExportCab{};

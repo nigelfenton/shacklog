@@ -39,6 +39,8 @@ set(SHACKLOG_SOURCES
     src/LogbookModel.h
     src/AdifReader.cpp
     src/AdifReader.h
+    src/AwardsDialog.cpp
+    src/AwardsDialog.h
     src/Qso.h
     src/EditDialog.cpp
     src/EditDialog.h
