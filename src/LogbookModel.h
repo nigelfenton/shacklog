@@ -82,6 +82,16 @@ public:
     bool    contestMode() const       { return settingValue("CONTEST_MODE") == "1"; }
     QString contestId() const         { return settingValue("CONTEST_ID"); }
 
+    // ── Import ────────────────────────────────────────────────────────
+    struct AdifImportResult {
+        bool ok{false};       // false == file-level failure; see errorString()
+        int  imported{0};
+        int  duplicates{0};   // same call+date+band+mode, TIME_ON equal to the minute
+        int  invalid{0};      // missing required fields, or insert failure
+    };
+    AdifImportResult importAdif(const QString& filePath,
+                                const QString& actor = QStringLiteral("adif-import"));
+
     // ── Export ────────────────────────────────────────────────────────
     int exportAdif(const QString& filePath, const LogbookFilter& filter = {}) const;
     int exportCabrillo(const QString& filePath,
@@ -118,6 +128,7 @@ private:
 
     static Qso qsoFromRow(class QSqlQuery& q);
     QString    filterToSql(const LogbookFilter& filter, QVariantList* binds) const;
+    bool       importDuplicateExists(const Qso& q) const;
 
     QSqlDatabase m_db;
     QString      m_lastError;

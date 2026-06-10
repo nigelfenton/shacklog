@@ -37,6 +37,8 @@ set(SHACKLOG_SOURCES
     src/TciClient.h
     src/LogbookModel.cpp
     src/LogbookModel.h
+    src/AdifReader.cpp
+    src/AdifReader.h
     src/Qso.h
     src/EditDialog.cpp
     src/EditDialog.h
@@ -142,6 +144,8 @@ set(SHACKLOG_SERVER_SOURCES
     src/Qso.h
     src/LogbookModel.cpp
     src/LogbookModel.h
+    src/AdifReader.cpp
+    src/AdifReader.h
 )
 
 add_executable(shacklog-server ${SHACKLOG_SERVER_SOURCES})

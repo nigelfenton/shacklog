@@ -208,6 +208,8 @@ MainWindow::~MainWindow() = default;
 void MainWindow::buildMenus()
 {
     auto* fileMenu = menuBar()->addMenu("&File");
+    m_actImportAdif = fileMenu->addAction("&Import ADIF…", this, &MainWindow::onImportAdif);
+    fileMenu->addSeparator();
     m_actExportAdif = fileMenu->addAction("Export &ADIF…", this, &MainWindow::onExportAdif);
     m_actExportCab  = fileMenu->addAction("Export &Cabrillo…", this, &MainWindow::onExportCabrillo);
     fileMenu->addSeparator();
@@ -819,6 +821,34 @@ void MainWindow::onSettings()
         applyPotaConfigFromSettings();
         refreshStatusBar();
     }
+}
+
+void MainWindow::onImportAdif()
+{
+    if (!m_model) return;
+    const QString path = QFileDialog::getOpenFileName(
+        this, "Import ADIF", QString(),
+        "ADIF files (*.adi *.adif);;All files (*)");
+    if (path.isEmpty()) return;
+
+    LogbookModel::AdifImportResult r;
+    {
+        // One table refresh at the end — not one per imported QSO.
+        const QSignalBlocker block(m_model);
+        r = m_model->importAdif(path);
+    }
+    refreshTable();
+    refreshStatusBar();
+
+    if (!r.ok) {
+        QMessageBox::critical(this, "Import failed", m_model->errorString());
+        return;
+    }
+    QMessageBox::information(this, "Import complete",
+        QString("Imported %1 QSO%2.\nSkipped %3 duplicate%4 and %5 invalid record%6.")
+            .arg(r.imported).arg(r.imported == 1 ? "" : "s")
+            .arg(r.duplicates).arg(r.duplicates == 1 ? "" : "s")
+            .arg(r.invalid).arg(r.invalid == 1 ? "" : "s"));
 }
 
 void MainWindow::onExportAdif()

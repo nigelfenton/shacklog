@@ -57,6 +57,7 @@ private slots:
     void onEditQso();
     void onDeleteQso();
     void onSettings();
+    void onImportAdif();
     void onExportAdif();
     void onExportCabrillo();
     void onAbout();
@@ -163,6 +164,7 @@ private:
     QLabel* m_sbDb{};
 
     // Menu actions
+    QAction* m_actImportAdif{};
     QAction* m_actExportAdif{};
     QAction* m_actExportCab{};
     QAction* m_actSettings{};

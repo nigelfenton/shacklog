@@ -1,5 +1,7 @@
 #include "LogbookModel.h"
 
+#include "AdifReader.h"
+
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -707,6 +709,63 @@ double LogbookModel::defaultTxPwr() const
     bool ok = false;
     const double v = settingValue("DEFAULT_TX_PWR").toDouble(&ok);
     return ok ? v : 0.0;
+}
+
+// ───────────────────────── ADIF import ─────────────────────────
+
+bool LogbookModel::importDuplicateExists(const Qso& q) const
+{
+    // Same station worked on the same date+band+mode with TIME_ON matching
+    // to the minute — tolerant of HHMM vs HHMMSS across loggers.
+    QSqlQuery query(m_db);
+    query.prepare(
+        "SELECT COUNT(*) FROM qsos WHERE call = ? AND qso_date = ? "
+        "AND band = ? AND mode = ? AND substr(time_on, 1, 4) = substr(?, 1, 4)");
+    query.addBindValue(q.call);
+    query.addBindValue(q.qsoDate);
+    query.addBindValue(q.band);
+    query.addBindValue(q.mode);
+    query.addBindValue(q.timeOn);
+    if (!query.exec() || !query.next())
+        return false;  // on query error, prefer importing over silent loss
+    return query.value(0).toInt() > 0;
+}
+
+LogbookModel::AdifImportResult LogbookModel::importAdif(const QString& filePath,
+                                                        const QString& actor)
+{
+    AdifImportResult r;
+    QFile f(filePath);
+    if (!f.open(QIODevice::ReadOnly)) {
+        m_lastError = f.errorString();
+        return r;
+    }
+    const QByteArray data = f.readAll();
+    f.close();
+
+    // One transaction for the whole file — a 1k-QSO Field Day log lands in
+    // one fsync instead of a thousand.
+    const bool tx = m_db.transaction();
+
+    qsizetype pos = 0;
+    QHash<QString, QString> fields;
+    while (Adif::nextRecord(data, pos, &fields)) {
+        Qso q = Adif::qsoFromFields(fields);
+        if (q.call.isEmpty() || q.qsoDate.isEmpty() || q.timeOn.isEmpty()
+            || q.band.isEmpty() || q.mode.isEmpty()) {
+            ++r.invalid;
+            continue;
+        }
+        if (importDuplicateExists(q)) {
+            ++r.duplicates;
+            continue;
+        }
+        if (insertQso(q, actor)) ++r.imported;
+        else                     ++r.invalid;
+    }
+    if (tx) m_db.commit();
+    r.ok = true;
+    return r;
 }
 
 // ───────────────────────── ADIF export ─────────────────────────
