@@ -32,10 +32,17 @@ TciClient::TciClient(QObject* parent)
     connect(m_socket, &QWebSocket::disconnected,     this, &TciClient::onDisconnected);
     connect(m_socket, &QWebSocket::textMessageReceived,
             this, &TciClient::onTextMessage);
-    // QWebSocket::errorOccurred has the QAbstractSocket::SocketError arg in
-    // Qt 6.  We only need a notification, not the specific code.
+    // QWebSocket grew errorOccurred in Qt 6.5; distro Qt 6.4 (Ubuntu 24.04)
+    // still has only the overloaded error() signal.  Either way we only need
+    // a notification, not the specific code.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     connect(m_socket, &QWebSocket::errorOccurred,
             this, &TciClient::onErrorOccurred);
+#else
+    connect(m_socket,
+            QOverload<QAbstractSocket::SocketError>::of(&QWebSocket::error),
+            this, &TciClient::onErrorOccurred);
+#endif
 
     connect(m_reconnectTimer, &QTimer::timeout,
             this, &TciClient::onReconnectTimeout);
