@@ -3,6 +3,7 @@
 #include "AwardsDialog.h"
 #include "LogbookModel.h"
 #include "TciClient.h"
+#include "server/WsjtxAdifReceiver.h"
 #include "EditDialog.h"
 #include "SettingsDialog.h"
 #include "SpotIndex.h"
@@ -159,6 +160,15 @@ MainWindow::MainWindow(QWidget* parent)
                               QString("Could not open logbook database:\n%1")
                                   .arg(m_model->errorString()));
     }
+
+    // WSJT-X direct ingest (solo-operating mode): listen for the Secondary
+    // UDP Server ADIF datagrams and log them straight into whichever log is
+    // open.  Point WSJT-X's Reporting tab at 127.0.0.1:1100.  (FD laptops
+    // point at shack-hub's server instead — same wire, different listener.)
+    m_wsjtx = new Server::WsjtxAdifReceiver(m_model, this);
+    if (!m_wsjtx->start(1100))
+        qWarning() << "WSJT-X UDP listener failed to bind 1100 — "
+                      "direct logging from WSJT-X disabled";
 
     buildMenus();
     buildUI();
@@ -549,6 +559,16 @@ void MainWindow::buildUI()
     m_sbTci = new QLabel("TCI: not connected");
     m_sbDxc = new QLabel("DXC: off");
     m_sbDb  = new QLabel("DB: —");
+    {
+        auto* sbWsjtx = new QLabel(
+            (m_wsjtx && m_wsjtx->isListening())
+                ? QStringLiteral("WSJT-X: udp/%1").arg(m_wsjtx->port())
+                : QStringLiteral("WSJT-X: off"));
+        sbWsjtx->setToolTip("WSJT-X Secondary UDP Server target for direct "
+                            "logging into the open log (Reporting tab → "
+                            "127.0.0.1:1100).");
+        statusBar()->addPermanentWidget(sbWsjtx);
+    }
     statusBar()->addPermanentWidget(m_sbTci);
     statusBar()->addPermanentWidget(m_sbDxc);
     statusBar()->addPermanentWidget(m_sbDb);

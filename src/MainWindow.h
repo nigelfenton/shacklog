@@ -34,6 +34,7 @@ class SpotIndex;
 class DxClusterClient;
 class PotaClient;
 struct SpotData;
+namespace Server { class WsjtxAdifReceiver; }
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -127,6 +128,7 @@ private:
     QString m_lastAutofilledCall;
     QString m_lastAutofilledComment;
     QString m_operatorCall;          // whose log is open (multi-log)
+    Server::WsjtxAdifReceiver* m_wsjtx{};  // WSJT-X UDP/ADIF → active log
 
     // Header
     QLabel*  m_myCallLabel{};

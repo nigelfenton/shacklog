@@ -41,6 +41,8 @@ set(SHACKLOG_SOURCES
     src/AdifReader.h
     src/AwardsDialog.cpp
     src/AwardsDialog.h
+    src/server/WsjtxAdifReceiver.cpp
+    src/server/WsjtxAdifReceiver.h
     src/Qso.h
     src/EditDialog.cpp
     src/EditDialog.h
