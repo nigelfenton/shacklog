@@ -20,6 +20,7 @@
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDir>
 #include <QFileDialog>
 #include <QInputDialog>
@@ -524,13 +525,19 @@ void MainWindow::buildUI()
         auto* row = new QHBoxLayout;
         row->setSpacing(6);
         m_countLabel = new QLabel("0 QSOs");
+        m_howFarBtn = new QPushButton("How far?");
+        m_howFarBtn->setToolTip(
+            "Open the PSK Reporter map filtered to stations that heard YOUR "
+            "signal in the last 15 minutes, on the current band/mode.");
         m_newBtn    = new QPushButton("New QSO…");
         m_editBtn   = new QPushButton("Edit…");
         m_deleteBtn = new QPushButton("Delete");
+        connect(m_howFarBtn, &QPushButton::clicked, this, &MainWindow::onHowFar);
         connect(m_newBtn,    &QPushButton::clicked, this, &MainWindow::onNewQso);
         connect(m_editBtn,   &QPushButton::clicked, this, &MainWindow::onEditQso);
         connect(m_deleteBtn, &QPushButton::clicked, this, &MainWindow::onDeleteQso);
         row->addWidget(m_countLabel);
+        row->addWidget(m_howFarBtn);
         row->addStretch();
         row->addWidget(m_newBtn);
         row->addWidget(m_editBtn);
@@ -920,6 +927,43 @@ bool MainWindow::chooseAndOpenLog(bool startup)
     settings.setValue("lastOperator", call);
     setWindowTitle(QString("ShackLog — %1").arg(call));
     return true;
+}
+
+void MainWindow::onHowFar()
+{
+    // "Who has heard me?" — open PSK Reporter's map filtered to signals
+    // SENT BY our callsign over the last 15 minutes, narrowed to the
+    // current band (and mode when TCI gave us an unambiguous one —
+    // DIGU-class slots leave it empty, and the callsign filter dominates
+    // anyway).
+    QString call = m_model ? m_model->myCall() : QString{};
+    if (call.isEmpty()) call = m_operatorCall;
+    if (call.isEmpty()) {
+        QMessageBox::information(this, "How far?",
+            "Set your callsign first (Settings → Operator).");
+        return;
+    }
+
+    // PSK Reporter's band parameter is a frequency range in Hz
+    // (verified from a working share link: band=12000000-16000000).
+    static const QHash<QString, QString> kPskBand = {
+        {"160m", "1800000-2000000"},     {"80m", "3500000-4000000"},
+        {"60m",  "5250000-5450000"},     {"40m", "7000000-7300000"},
+        {"30m",  "10100000-10150000"},   {"20m", "14000000-14350000"},
+        {"17m",  "18068000-18168000"},   {"15m", "21000000-21450000"},
+        {"12m",  "24890000-24990000"},   {"10m", "28000000-29700000"},
+        {"6m",   "50000000-54000000"},   {"4m",  "70000000-70500000"},
+        {"2m",   "144000000-148000000"}, {"70cm", "420000000-450000000"}};
+
+    QString url = QStringLiteral(
+        "https://pskreporter.info/pskmap.html?preset&callsign=%1"
+        "&txrx=tx&timerange=900")
+        .arg(QString::fromUtf8(QUrl::toPercentEncoding(call)));
+    const QString pskBand = kPskBand.value(m_curBand);
+    if (!pskBand.isEmpty())     url += QStringLiteral("&band=") + pskBand;
+    if (!m_curMode.isEmpty())   url += QStringLiteral("&mode=") + m_curMode;
+
+    QDesktopServices::openUrl(QUrl(url));
 }
 
 void MainWindow::onSwitchLog()

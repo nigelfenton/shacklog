@@ -59,6 +59,7 @@ private slots:
     void onSettings();
     void onSwitchLog();
     void onShowAwards();
+    void onHowFar();
     void onImportAdif();
     void onExportAdif();
     void onExportCabrillo();
@@ -161,6 +162,7 @@ private:
     // Table + actions
     QTableWidget* m_table{};
     QLabel*       m_countLabel{};
+    QPushButton*  m_howFarBtn{};
     QPushButton*  m_newBtn{};
     QPushButton*  m_editBtn{};
     QPushButton*  m_deleteBtn{};
