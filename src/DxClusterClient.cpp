@@ -9,10 +9,11 @@ namespace ShackLog {
 
 namespace {
 constexpr int kBackoff[] = { 1, 2, 5, 10, 30 };
+constexpr int kBackoffMaxIndex =
+    static_cast<int>(sizeof(kBackoff) / sizeof(kBackoff[0])) - 1;
 int backoffSeconds(int attempt) {
-    const int n = static_cast<int>(sizeof(kBackoff) / sizeof(kBackoff[0]));
     if (attempt < 0) attempt = 0;
-    return kBackoff[attempt < n ? attempt : n - 1];
+    return kBackoff[attempt < kBackoffMaxIndex ? attempt : kBackoffMaxIndex];
 }
 
 // "DX de SPOTTER[suffix]:    14250.0  K1ABC      CQ DX            1234Z"
@@ -32,10 +33,20 @@ DxClusterClient::DxClusterClient(QObject* parent)
     : QObject(parent),
       m_socket(new QTcpSocket(this)),
       m_reconnectTimer(new QTimer(this)),
-      m_loginTimer(new QTimer(this))
+      m_loginTimer(new QTimer(this)),
+      m_stableTimer(new QTimer(this))
 {
     m_reconnectTimer->setSingleShot(true);
     m_loginTimer->setSingleShot(true);
+    m_stableTimer->setSingleShot(true);
+
+    // Only a connection that survives this long counts as healthy enough
+    // to reset the backoff ladder.  An accept-then-drop server (or a
+    // duplicate-login ping-pong) keeps climbing toward the 30 s cap.
+    m_stableTimer->setInterval(45 * 1000);
+    connect(m_stableTimer, &QTimer::timeout, this, [this]() {
+        m_reconnectAttempts = 0;
+    });
 
     connect(m_socket, &QTcpSocket::connected,    this, &DxClusterClient::onConnected);
     connect(m_socket, &QTcpSocket::disconnected, this, &DxClusterClient::onDisconnected);
@@ -93,16 +104,17 @@ void DxClusterClient::disconnectFromCluster()
 
 void DxClusterClient::onConnected()
 {
-    m_reconnectAttempts = 0;
     m_loginSent = false;
     m_rxBuffer.clear();
     setConnected(true);
     m_loginTimer->start(3000);            // grace window for prompt-driven login
+    m_stableTimer->start();               // backoff resets only after 45 s up
 }
 
 void DxClusterClient::onDisconnected()
 {
     m_loginTimer->stop();
+    m_stableTimer->stop();
     setConnected(false);
     if (!m_userInitiatedDisconnect) scheduleReconnect();
 }
@@ -146,6 +158,20 @@ void DxClusterClient::onReadyRead()
 void DxClusterClient::maybeSendLogin(const QString& chunk)
 {
     const QString lower = chunk.toLower();
+
+    // DXSpider duplicate-login kick — a NEW client logged in with our
+    // exact callsign-SSID and the server is dropping US in its favour:
+    //   "Reconnected as G0JKN-2 at 1.2.3.4, this instance is disconnected"
+    // Storming straight back in would kick the other client, which storms
+    // back in turn — two clients sharing a login ping-pong at ~1 s forever
+    // (proven live against NG7M-1, 2026-06-12).  Go to max backoff and
+    // surface it so the operator can find the second client.
+    if (m_loginSent && lower.contains("this instance is disconnected")) {
+        m_lastError = chunk.trimmed();
+        m_reconnectAttempts = kBackoffMaxIndex;
+        emit duplicateLoginKick(chunk.trimmed());
+        return;
+    }
 
     // Catch a login-rejection message before we re-send the login on
     // the same prompt.  DXSpider answers "login: Sorry G0JKN-L is an

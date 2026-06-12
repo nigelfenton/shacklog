@@ -249,6 +249,23 @@ MainWindow::MainWindow(QWidget* parent)
                 refreshStatusBar();
             });
 
+    connect(m_dxc, &DxClusterClient::duplicateLoginKick, this,
+            [this](const QString& msg) {
+                if (m_dxcLog) {
+                    m_dxcLog->appendPlainText(
+                        QString("[%1] DUPLICATE LOGIN KICK: %2 — another "
+                                "program logged in with our callsign-SSID "
+                                "(second ShackLog / laptop / logger?). "
+                                "Retrying slowly; change the Login suffix in "
+                                "Settings → DX Cluster on one of them.")
+                            .arg(QDateTime::currentDateTime().toString("HH:mm:ss"))
+                            .arg(msg));
+                }
+                statusBar()->showMessage(
+                    "Cluster: another client logged in with our callsign — "
+                    "see DX Cluster Log", 10000);
+            });
+
     // Hidden, lazy-shown diagnostic buffer for the cluster traffic.
     // Populated continuously so it has history when first opened.
     m_dxcLog = new QPlainTextEdit;

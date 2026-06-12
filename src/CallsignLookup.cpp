@@ -10,19 +10,35 @@
 namespace ShackLog {
 
 namespace {
-// Parse a flat XML document, returning the text of the wanted elements.
-// Both QRZ and HamQTH responses are shallow enough for this.
+// Collect every leaf element's text, keyed by lower-cased element name.
+// QRZ and HamQTH both nest their payload (<HamQTH><session><session_id>…),
+// so this walks tokens rather than using readElementText() — calling that
+// on a container element consumes its whole subtree and returns nothing,
+// which silently discarded every response until 2026-06-12.
 QHash<QString, QString> flatXml(const QByteArray& body)
 {
     QHash<QString, QString> out;
     QXmlStreamReader xml(body);
+    QString name, text;
     while (!xml.atEnd()) {
-        if (xml.readNext() == QXmlStreamReader::StartElement) {
-            const QString name = xml.name().toString().toLower();
-            const QString text = xml.readElementText(
-                QXmlStreamReader::SkipChildElements);
-            if (!text.trimmed().isEmpty())
+        switch (xml.readNext()) {
+        case QXmlStreamReader::StartElement:
+            name = xml.name().toString().toLower();
+            text.clear();
+            break;
+        case QXmlStreamReader::Characters:
+            if (!xml.isWhitespace()) text += xml.text();
+            break;
+        case QXmlStreamReader::EndElement:
+            // Only leaves store: a container's EndElement arrives after a
+            // child already cleared `name`, so containers fall through.
+            if (!name.isEmpty() && !text.trimmed().isEmpty())
                 out.insert(name, text.trimmed());
+            name.clear();
+            text.clear();
+            break;
+        default:
+            break;
         }
     }
     return out;

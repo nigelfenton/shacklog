@@ -15,7 +15,17 @@
 // (between call and time) are passed through verbatim.
 //
 // On disconnect the client auto-reconnects with the same exponential
-// backoff schedule as TciClient (1, 2, 5, 10, 30 seconds).
+// backoff schedule as TciClient (1, 2, 5, 10, 30 seconds).  The attempt
+// counter resets only after a connection has stayed up for a while —
+// resetting on raw TCP connect would turn a server that accepts-then-
+// drops into a 1-second hammer loop.
+//
+// DXSpider allows one session per callsign-SSID: a NEW login wins and
+// the existing session is told "Reconnected as <call> at <ip>, this
+// instance is disconnected" and dropped.  Two clients sharing a login
+// therefore kick each other forever.  We detect that message, emit
+// duplicateLoginKick() so the UI can tell the operator, and jump
+// straight to the maximum backoff instead of storming back.
 
 #include "SpotData.h"
 
@@ -51,6 +61,9 @@ signals:
     void spotReceived(const ShackLog::SpotData& spot);
     void rawLine(const QString& line);            // diagnostic
     void loginRejected(const QString& reason);    // server refused our callsign
+    // Another client logged in with our exact callsign-SSID and the
+    // server dropped us in its favour. Reconnect continues, but slowly.
+    void duplicateLoginKick(const QString& serverMessage);
 
 private slots:
     void onConnected();
@@ -69,6 +82,7 @@ private:
     QTcpSocket* m_socket{nullptr};
     QTimer*     m_reconnectTimer{nullptr};
     QTimer*     m_loginTimer{nullptr};
+    QTimer*     m_stableTimer{nullptr};   // resets backoff after sustained uptime
 
     QString  m_host;
     quint16  m_port{0};
