@@ -1145,7 +1145,7 @@ void MainWindow::onExportCabrillo()
 void MainWindow::onAbout()
 {
     QMessageBox::about(this, "About ShackLog",
-        "<h3>ShackLog</h3>"
+        QString("<h3>ShackLog %1</h3>").arg(qApp->applicationVersion()) +
         "<p>Standalone ham radio logbook with TCI integration.</p>"
         "<p>Live freq / mode from any TCI server (AetherSDR, ExpertSDR2, "
         "SunSDR). ADIF and Cabrillo export.</p>"
