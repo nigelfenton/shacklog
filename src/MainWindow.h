@@ -37,6 +37,7 @@ class SpotIndex;
 class DxClusterClient;
 class PotaClient;
 class CallsignLookup;
+class SectionMapDialog;
 struct SpotData;
 namespace Server { class WsjtxAdifReceiver; }
 
@@ -64,6 +65,7 @@ private slots:
     void onSettings();
     void onSwitchLog();
     void onShowAwards();
+    void onShowSectionMap();
     void onHowFar();
     void onImportAdif();
     void onExportAdif();
@@ -140,6 +142,7 @@ private:
     CtyDat           m_cty;              // offline prefix → country/zones
     CallsignLookup*  m_lookup{nullptr};  // online QRZ / HamQTH / callook
     QTimer*          m_lookupDebounce{nullptr};  // typed-call settle timer
+    SectionMapDialog* m_sectionMap{nullptr};     // non-modal, lazily created
     Qso     m_lookupFill;        // pending details for the next save…
     QString m_lookupFillCall;    // …valid only while the call field matches
     QString m_operatorCall;          // whose log is open (multi-log)
@@ -192,6 +195,8 @@ private:
     // Menu actions
     QAction* m_actSwitchLog{};
     QAction* m_actAwards{};
+    QAction* m_actSectionMap{};
+    QAction* m_actHowFarMap{};
     QAction* m_actImportAdif{};
     QAction* m_actExportAdif{};
     QAction* m_actExportCab{};

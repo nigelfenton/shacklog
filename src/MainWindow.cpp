@@ -10,6 +10,7 @@
 #include "DxClusterClient.h"
 #include "PotaClient.h"
 #include "CallsignLookup.h"
+#include "SectionMapDialog.h"
 #include "AetherSettingsReader.h"
 
 #include <QDialog>
@@ -345,8 +346,28 @@ void MainWindow::buildMenus()
     m_actDxcLog        = toolsMenu->addAction("DX Cluster &Log…", this, &MainWindow::onShowClusterLog);
     m_actSpotIndex     = toolsMenu->addAction("Show Spot &Index…", this, &MainWindow::onShowSpotIndex);
 
+    auto* mapsMenu = menuBar()->addMenu("&Maps");
+    m_actSectionMap = mapsMenu->addAction("&Section Map (ARRL/RAC)…",
+                                          this, &MainWindow::onShowSectionMap);
+    m_actHowFarMap  = mapsMenu->addAction("&How far? (PSK Reporter)…",
+                                          this, &MainWindow::onHowFar);
+
     auto* helpMenu = menuBar()->addMenu("&Help");
     m_actAbout = helpMenu->addAction("&About ShackLog", this, &MainWindow::onAbout);
+}
+
+void MainWindow::onShowSectionMap()
+{
+    if (!m_model) return;
+    if (!m_sectionMap) {
+        m_sectionMap = new SectionMapDialog(m_model, this);
+        m_sectionMap->setAttribute(Qt::WA_DeleteOnClose);
+        connect(m_sectionMap, &QObject::destroyed, this,
+                [this]() { m_sectionMap = nullptr; });
+    }
+    m_sectionMap->show();
+    m_sectionMap->raise();
+    m_sectionMap->activateWindow();
 }
 
 // ── Layout ─────────────────────────────────────────────────────────────
