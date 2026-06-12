@@ -14,6 +14,9 @@
 //
 // Owns the LogbookModel and a TciClient singleton.
 
+#include "CtyDat.h"
+#include "Qso.h"
+
 #include <QMainWindow>
 
 class QAction;
@@ -33,6 +36,7 @@ class TciClient;
 class SpotIndex;
 class DxClusterClient;
 class PotaClient;
+class CallsignLookup;
 struct SpotData;
 namespace Server { class WsjtxAdifReceiver; }
 
@@ -104,7 +108,11 @@ private:
     void applyAutoConnectFromSettings();
     void applyClusterConfigFromSettings();
     void applyPotaConfigFromSettings();
+    void applyLookupConfigFromSettings();
     void tryAutofillFromSpot();
+    // Kick the callsign-lookup chain (worked-before → cty.dat → online).
+    // Results land in m_lookupFill and merge into empty fields at save.
+    void startCallsignLookup(const QString& call);
     qint64 selectedQsoId() const;
 
     LogbookModel*    m_model{nullptr};
@@ -127,6 +135,13 @@ private:
     // operator's typed input (must be left alone).
     QString m_lastAutofilledCall;
     QString m_lastAutofilledComment;
+
+    // Callsign lookup chain
+    CtyDat           m_cty;              // offline prefix → country/zones
+    CallsignLookup*  m_lookup{nullptr};  // online QRZ / HamQTH / callook
+    QTimer*          m_lookupDebounce{nullptr};  // typed-call settle timer
+    Qso     m_lookupFill;        // pending details for the next save…
+    QString m_lookupFillCall;    // …valid only while the call field matches
     QString m_operatorCall;          // whose log is open (multi-log)
     Server::WsjtxAdifReceiver* m_wsjtx{};  // WSJT-X UDP/ADIF → active log
 

@@ -542,6 +542,19 @@ Qso LogbookModel::getQso(qint64 id, bool* ok) const
     return q;
 }
 
+Qso LogbookModel::lastQsoWith(const QString& call) const
+{
+    Qso q;
+    const QString c = call.trimmed().toUpper();
+    if (!m_db.isOpen() || c.isEmpty()) return q;
+    QSqlQuery sel{m_db};
+    sel.prepare("SELECT * FROM qsos WHERE call = :call AND deleted_at IS NULL "
+                "ORDER BY id DESC LIMIT 1");
+    sel.bindValue(":call", c);
+    if (!sel.exec() || !sel.next()) return q;
+    return qsoFromRow(sel);
+}
+
 QString LogbookModel::filterToSql(const LogbookFilter& filter, QVariantList* binds) const
 {
     // Soft-deleted rows are always filtered out — there's no caller-facing

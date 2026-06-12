@@ -141,6 +141,47 @@ void SettingsDialog::buildUI()
 
     tabs->addTab(dxc, "DX Cluster");
 
+    // ── Callsign lookup ─────────────────────────────────────────────────
+    auto* lk = new QWidget;
+    auto* lkL = new QFormLayout(lk);
+    m_lkWorkedBefore = new QCheckBox("Fill name/QTH from previous QSOs with this call");
+    m_lkCty          = new QCheckBox("Fill country/continent/zones from cty.dat (offline)");
+    m_lkProvider     = new QComboBox;
+    m_lkProvider->addItem("None",                                "none");
+    m_lkProvider->addItem("QRZ.com (XML subscription required)", "qrz");
+    m_lkProvider->addItem("HamQTH.com (free account)",           "hamqth");
+    m_lkUser = new QLineEdit;
+    m_lkPass = new QLineEdit;
+    m_lkPass->setEchoMode(QLineEdit::Password);
+    m_lkCallook = new QCheckBox(
+        "Use callook.info for US calls when no provider is set (no account)");
+    auto* lkNote = new QLabel(
+        "Looked-up details only ever fill EMPTY fields — anything you type "
+        "wins. QRZ XML lookups need a paid QRZ XML-data subscription; a free "
+        "QRZ web login will return an error. The password is stored in this "
+        "log's database file.");
+    lkNote->setStyleSheet("QLabel { color: #6b8099; font-size: 10px; }");
+    lkNote->setWordWrap(true);
+    lkL->addRow(m_lkWorkedBefore);
+    lkL->addRow(m_lkCty);
+    lkL->addRow("Online provider", m_lkProvider);
+    lkL->addRow("Username",        m_lkUser);
+    lkL->addRow("Password",        m_lkPass);
+    lkL->addRow(m_lkCallook);
+    lkL->addRow(lkNote);
+
+    auto refreshLkEditable = [this]() {
+        const bool online =
+            m_lkProvider->currentData().toString() != QLatin1String("none");
+        m_lkUser->setEnabled(online);
+        m_lkPass->setEnabled(online);
+        m_lkCallook->setEnabled(!online);
+    };
+    connect(m_lkProvider, &QComboBox::currentIndexChanged, this,
+            [refreshLkEditable](int){ refreshLkEditable(); });
+
+    tabs->addTab(lk, "Lookup");
+
     // ── Contest ─────────────────────────────────────────────────────────
     auto* ctst = new QWidget;
     auto* ctstL = new QFormLayout(ctst);
@@ -247,6 +288,25 @@ void SettingsDialog::populate()
     m_dxcPort->setEnabled(manual);
     m_dxcCallsign->setEnabled(manual);
 
+    const QString lkProv = m_model->settingValue("LOOKUP_PROVIDER", "none");
+    for (int i = 0; i < m_lkProvider->count(); ++i) {
+        if (m_lkProvider->itemData(i).toString() == lkProv) {
+            m_lkProvider->setCurrentIndex(i);
+            break;
+        }
+    }
+    m_lkWorkedBefore->setChecked(m_model->settingValue("LOOKUP_WORKEDBEFORE", "1") == "1");
+    m_lkCty->setChecked(m_model->settingValue("LOOKUP_CTY", "1") == "1");
+    m_lkUser->setText(m_model->settingValue("LOOKUP_USERNAME"));
+    m_lkPass->setText(m_model->settingValue("LOOKUP_PASSWORD"));
+    m_lkCallook->setChecked(m_model->settingValue("LOOKUP_CALLOOK", "1") == "1");
+    {
+        const bool online = lkProv != QLatin1String("none");
+        m_lkUser->setEnabled(online);
+        m_lkPass->setEnabled(online);
+        m_lkCallook->setEnabled(!online);
+    }
+
     m_contestMode->setChecked(m_model->contestMode());
     const QString cid = m_model->contestId();
     int idx = m_contestId->findText(cid);
@@ -307,6 +367,13 @@ void SettingsDialog::onAccept()
 
     m_model->setSetting("POTA_ENABLE",   m_potaEnable->isChecked() ? "1" : "0");
     m_model->setSetting("POTA_POLL_SEC", QString::number(m_potaPollSec->value()));
+
+    m_model->setSetting("LOOKUP_WORKEDBEFORE", m_lkWorkedBefore->isChecked() ? "1" : "0");
+    m_model->setSetting("LOOKUP_CTY",          m_lkCty->isChecked() ? "1" : "0");
+    m_model->setSetting("LOOKUP_PROVIDER",     m_lkProvider->currentData().toString());
+    m_model->setSetting("LOOKUP_USERNAME",     m_lkUser->text().trimmed());
+    m_model->setSetting("LOOKUP_PASSWORD",     m_lkPass->text());
+    m_model->setSetting("LOOKUP_CALLOOK",      m_lkCallook->isChecked() ? "1" : "0");
 
     m_model->setSetting("CONTEST_MODE",     m_contestMode->isChecked() ? "1" : "0");
     m_model->setSetting("CONTEST_ID",       m_contestId->currentText().trimmed().toUpper());

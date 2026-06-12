@@ -58,6 +58,12 @@ set(SHACKLOG_SOURCES
     src/DxClusterClient.h
     src/PotaClient.cpp
     src/PotaClient.h
+    # ── Callsign lookup (worked-before / cty.dat / QRZ-HamQTH-callook) ──
+    src/CtyDat.cpp
+    src/CtyDat.h
+    src/CallsignLookup.cpp
+    src/CallsignLookup.h
+    data/cty.qrc
 )
 
 # Windows: link as a GUI app so no console window appears at launch.

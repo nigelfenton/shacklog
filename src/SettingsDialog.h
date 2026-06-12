@@ -5,6 +5,8 @@
 // Lives in tabs:
 //   • Operator — MY_CALL, MY_GRIDSQUARE, MY_STATE, default TX power, OPERATOR
 //   • TCI      — host, port, autoconnect on launch
+//   • Lookup   — callsign → name/QTH lookup chain (worked-before, cty.dat,
+//                QRZ XML / HamQTH / callook.info online providers)
 //   • Contest  — contest mode toggle, contest id, next STX serial
 //   • Cabrillo — header fields used by Cabrillo export
 //
@@ -61,6 +63,14 @@ private:
     // POTA (HTTP poll, independent of cluster)
     QCheckBox*  m_potaEnable{};
     QSpinBox*   m_potaPollSec{};
+
+    // Callsign lookup
+    QCheckBox*  m_lkWorkedBefore{};
+    QCheckBox*  m_lkCty{};
+    QComboBox*  m_lkProvider{};
+    QLineEdit*  m_lkUser{};
+    QLineEdit*  m_lkPass{};
+    QCheckBox*  m_lkCallook{};
 
     // Contest
     QCheckBox*  m_contestMode{};

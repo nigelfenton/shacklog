@@ -9,6 +9,7 @@
 #include "SpotIndex.h"
 #include "DxClusterClient.h"
 #include "PotaClient.h"
+#include "CallsignLookup.h"
 #include "AetherSettingsReader.h"
 
 #include <QDialog>
@@ -170,6 +171,45 @@ MainWindow::MainWindow(QWidget* parent)
         qWarning() << "WSJT-X UDP listener failed to bind 1100 — "
                       "direct logging from WSJT-X disabled";
 
+    // Callsign-lookup chain: cty.dat ships inside the binary as a resource;
+    // online providers are configured from settings (Lookup tab).
+    m_cty.load(QStringLiteral(":/data/cty.dat"));
+    if (!m_cty.isLoaded())
+        qWarning() << "cty.dat resource failed to load — offline country "
+                      "lookup disabled";
+    m_lookup = new CallsignLookup(this);
+    m_lookupDebounce = new QTimer(this);
+    m_lookupDebounce->setSingleShot(true);
+    m_lookupDebounce->setInterval(700);
+    connect(m_lookupDebounce, &QTimer::timeout, this, [this] {
+        if (m_callEdit) startCallsignLookup(m_callEdit->text());
+    });
+    connect(m_lookup, &CallsignLookup::result, this,
+            [this](const CallsignLookup::Result& r) {
+        if (r.call != m_lookupFillCall) return;     // call changed — stale
+        if (!r.ok) {
+            if (!r.error.isEmpty())
+                statusBar()->showMessage(
+                    QString("%1 lookup failed: %2").arg(r.source, r.error), 5000);
+            return;
+        }
+        if (m_lookupFill.name.isEmpty())       m_lookupFill.name       = r.name;
+        if (m_lookupFill.qth.isEmpty())        m_lookupFill.qth        = r.qth;
+        if (m_lookupFill.state.isEmpty())      m_lookupFill.state      = r.state;
+        if (m_lookupFill.cnty.isEmpty())       m_lookupFill.cnty       = r.county;
+        if (m_lookupFill.country.isEmpty())    m_lookupFill.country    = r.country;
+        if (m_lookupFill.gridsquare.isEmpty()) m_lookupFill.gridsquare = r.grid;
+        if (!m_lookupFill.dxcc && r.dxcc)      m_lookupFill.dxcc       = r.dxcc;
+        QStringList bits;
+        if (!r.name.isEmpty()) bits << r.name;
+        if (!r.qth.isEmpty())  bits << r.qth;
+        if (!r.state.isEmpty()) bits << r.state;
+        if (!bits.isEmpty())
+            statusBar()->showMessage(
+                QString("%1: %2 — fills on save").arg(r.source, bits.join(", ")),
+                6000);
+    });
+
     buildMenus();
     buildUI();
 
@@ -252,6 +292,7 @@ MainWindow::MainWindow(QWidget* parent)
     applyAutoConnectFromSettings();
     applyClusterConfigFromSettings();
     applyPotaConfigFromSettings();
+    applyLookupConfigFromSettings();
 }
 
 MainWindow::~MainWindow() = default;
@@ -628,6 +669,8 @@ void MainWindow::onCallEdited(const QString& text)
     }
     m_saveBtn->setEnabled(!upper.trimmed().isEmpty());
     refreshDupBadge();
+    // Lookup is debounced so we query once per call, not per keystroke.
+    if (m_lookupDebounce) m_lookupDebounce->start();
 }
 
 void MainWindow::refreshDupBadge()
@@ -677,6 +720,22 @@ void MainWindow::onSaveQso()
         q.srxString  = m_srxStringEdit->text().trimmed();
     }
 
+    // Merge pending lookup results (worked-before / cty.dat / online) into
+    // fields the quick-entry row has no widgets for.  Guarded by call match
+    // so a late result for a previous call can never leak into this QSO.
+    if (m_lookupFillCall == call) {
+        q.name       = m_lookupFill.name;
+        q.qth        = m_lookupFill.qth;
+        q.gridsquare = m_lookupFill.gridsquare;
+        q.state      = m_lookupFill.state;
+        q.cnty       = m_lookupFill.cnty;
+        q.country    = m_lookupFill.country;
+        q.cont       = m_lookupFill.cont;
+        q.dxcc       = m_lookupFill.dxcc;
+        q.cqz        = m_lookupFill.cqz;
+        q.ituz       = m_lookupFill.ituz;
+    }
+
     if (!m_model->insertQso(q)) {
         QMessageBox::critical(this, "Save failed", m_model->errorString());
         return;
@@ -690,6 +749,8 @@ void MainWindow::onSaveQso()
     // so the next freq change will autofill afresh.
     m_lastAutofilledCall.clear();
     m_lastAutofilledComment.clear();
+    m_lookupFill = Qso{};
+    m_lookupFillCall.clear();
     if (m_model->contestMode()) {
         const int next = m_stxEdit->text().toInt() + 1;
         m_stxEdit->setText(QString::number(next));
@@ -891,6 +952,7 @@ void MainWindow::onSettings()
         // (no-op if nothing changed; enables/disables/reconnects otherwise).
         applyClusterConfigFromSettings();
         applyPotaConfigFromSettings();
+        applyLookupConfigFromSettings();
         refreshStatusBar();
     }
 }
@@ -1204,6 +1266,7 @@ void MainWindow::tryAutofillFromSpot()
     m_lastAutofilledCall = hit->call;
     m_saveBtn->setEnabled(true);
     refreshDupBadge();
+    startCallsignLookup(hit->call);
 
     // Comment field: replace if it's empty OR if it equals the comment
     // we put there from the previous auto-fill (so spot-to-spot hops
@@ -1437,6 +1500,77 @@ void MainWindow::applyPotaConfigFromSettings()
     m_pota->start(sec);
     if (m_dxcLog)
         m_dxcLog->appendPlainText(QString("[apply] POTA polling started (every %1 s)").arg(sec));
+}
+
+// ── Callsign lookup chain ────────────────────────────────────────────────
+
+void MainWindow::applyLookupConfigFromSettings()
+{
+    if (!m_model || !m_lookup) return;
+    const QString prov = m_model->settingValue("LOOKUP_PROVIDER", "none");
+    auto p = CallsignLookup::Provider::None;
+    if (prov == "qrz")         p = CallsignLookup::Provider::Qrz;
+    else if (prov == "hamqth") p = CallsignLookup::Provider::HamQth;
+    m_lookup->configure(p,
+                        m_model->settingValue("LOOKUP_USERNAME"),
+                        m_model->settingValue("LOOKUP_PASSWORD"),
+                        m_model->settingValue("LOOKUP_CALLOOK", "1") == "1");
+}
+
+void MainWindow::startCallsignLookup(const QString& callIn)
+{
+    const QString call = callIn.trimmed().toUpper();
+    if (call == m_lookupFillCall) return;        // already resolved / in flight
+    m_lookupFill = Qso{};
+    m_lookupFillCall = call;
+    if (call.isEmpty() || !m_model || !m_model->isOpen()) return;
+
+    // Tier 1 — worked before: previous QSO details beat any online source.
+    bool havePersonal = false;
+    if (m_model->settingValue("LOOKUP_WORKEDBEFORE", "1") == "1") {
+        const Qso prev = m_model->lastQsoWith(call);
+        if (prev.id >= 0) {
+            m_lookupFill.name       = prev.name;
+            m_lookupFill.qth        = prev.qth;
+            m_lookupFill.gridsquare = prev.gridsquare;
+            m_lookupFill.state      = prev.state;
+            m_lookupFill.cnty       = prev.cnty;
+            m_lookupFill.country    = prev.country;
+            m_lookupFill.cont       = prev.cont;
+            m_lookupFill.dxcc       = prev.dxcc;
+            m_lookupFill.cqz        = prev.cqz;
+            m_lookupFill.ituz       = prev.ituz;
+            havePersonal = !prev.name.isEmpty() || !prev.qth.isEmpty();
+            if (havePersonal) {
+                QStringList bits;
+                if (!prev.name.isEmpty()) bits << prev.name;
+                if (!prev.qth.isEmpty())  bits << prev.qth;
+                statusBar()->showMessage(
+                    QString("Worked before (%1 on %2): %3 — fills on save")
+                        .arg(prev.band, prev.qsoDate, bits.join(", ")),
+                    6000);
+            }
+        }
+    }
+
+    // Tier 2 — cty.dat: instant, offline country / continent / zones.
+    bool isUs = false;
+    if (m_cty.isLoaded()) {
+        const auto e = m_cty.lookup(call);
+        if (e.valid) {
+            isUs = e.country == QLatin1String("United States");
+            if (m_model->settingValue("LOOKUP_CTY", "1") == "1") {
+                if (m_lookupFill.country.isEmpty()) m_lookupFill.country = e.country;
+                if (m_lookupFill.cont.isEmpty())    m_lookupFill.cont    = e.cont;
+                if (!m_lookupFill.cqz)              m_lookupFill.cqz     = e.cqz;
+                if (!m_lookupFill.ituz)             m_lookupFill.ituz    = e.ituz;
+            }
+        }
+    }
+
+    // Tier 3 — online (QRZ / HamQTH / callook), only for the gaps tier 1
+    // couldn't fill.  Async; the result lambda merges when it lands.
+    if (!havePersonal) m_lookup->lookup(call, isUs);
 }
 
 // ── Status bar ───────────────────────────────────────────────────────────

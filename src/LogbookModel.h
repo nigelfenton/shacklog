@@ -70,6 +70,11 @@ public:
     QVector<Qso> queryQsos(const LogbookFilter& filter = {}) const;
     int          countQsos(const LogbookFilter& filter = {}) const;
 
+    // Most recent QSO with this exact callsign, or an empty Qso (id == -1)
+    // if never worked.  The "worked before" tier of callsign lookup —
+    // previous name/QTH/grid beats any online source.
+    Qso lastQsoWith(const QString& call) const;
+
     bool isDuplicate(const QString& call,
                      const QString& band,
                      const QString& mode,
