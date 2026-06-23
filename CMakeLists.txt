@@ -150,6 +150,8 @@ set(SHACKLOG_SERVER_SOURCES
     src/server/HttpServer.h
     src/server/N3fjpServer.cpp
     src/server/N3fjpServer.h
+    src/server/N3fjpClient.cpp
+    src/server/N3fjpClient.h
     src/server/WsjtxAdifReceiver.cpp
     src/server/WsjtxAdifReceiver.h
     # ── Domain layer reused from the desktop binary (see design doc §16) ──

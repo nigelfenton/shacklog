@@ -12,6 +12,7 @@
 
 #include "HttpServer.h"
 #include "N3fjpServer.h"
+#include "N3fjpClient.h"
 #include "WsjtxAdifReceiver.h"
 #include "LogbookModel.h"
 
@@ -42,6 +43,18 @@ int main(int argc, char* argv[])
         QStringList{QStringLiteral("db")},
         QStringLiteral("Path to the SQLite logbook (default: per-user data dir)"),
         QStringLiteral("path"));
+    // Mirror mode: connect OUT to a remote N3FJP server and mirror its QSOs.
+    QCommandLineOption n3fjpHostOpt(
+        QStringList{QStringLiteral("n3fjp-host")},
+        QStringLiteral("Mirror a remote N3FJP server: connect to HOST:n3fjp-client-port "
+                       "and ingest its logged QSOs (e.g. a Field Day station laptop)."),
+        QStringLiteral("host"));
+    QCommandLineOption n3fjpClientPortOpt(
+        QStringList{QStringLiteral("n3fjp-client-port")},
+        QStringLiteral("Port of the remote N3FJP server to mirror (default 1100)."),
+        QStringLiteral("port"), QStringLiteral("1100"));
+    cli.addOption(n3fjpHostOpt);
+    cli.addOption(n3fjpClientPortOpt);
     cli.addOption(httpPortOpt);
     cli.addOption(n3fjpPortOpt);
     cli.addOption(dbPathOpt);
@@ -74,6 +87,16 @@ int main(int argc, char* argv[])
     WsjtxAdifReceiver wsjtx(&model);
     if (!wsjtx.start(n3fjpPort)) {
         qWarning() << "WsjtxAdifReceiver did not start — WSJT-X UDP log path disabled";
+    }
+
+    // Optional mirror: pull a remote N3FJP server's QSOs into our logbook.
+    N3fjpClient n3fjpClient(&model);
+    const QString mirrorHost = cli.value(n3fjpHostOpt);
+    if (!mirrorHost.isEmpty()) {
+        const quint16 mirrorPort = cli.value(n3fjpClientPortOpt).toUShort();
+        n3fjpClient.start(mirrorHost, mirrorPort);
+        qInfo().noquote() << "  N3FJP MIRROR :" << QString("%1:%2 (ingesting its QSOs)")
+                             .arg(mirrorHost).arg(mirrorPort);
     }
 
     qInfo() << "shacklog-server ready.";
