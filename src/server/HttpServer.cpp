@@ -117,6 +117,57 @@ QJsonObject qsoToJson(const Qso& q)
     return o;
 }
 
+// ───────────────────────── ARRL Field Day scoring ─────────────────────────
+// Score = (QSO points × power multiplier) + bonus points.
+//   QSO points: phone = 1, CW = 2, digital = 2 (per ARRL FD rules).
+//     We classify by N3FJP's MODETEST bucket (stashed in Qso::submode): PH / CW / DG.
+//     Falls back to the operating MODE string if submode is absent.
+//   Power multiplier (station setting, passed in): 5 (≤5W non-commercial),
+//     2 (≤100W / ≤5W mains), 1 (>100W). Default 2.
+//   Bonus points: checkbox-based, not derivable from QSOs — passed in (default 0).
+// Returns a JSON object with the breakdown.
+QJsonObject computeFdScore(const QVector<Qso>& qsos, int powerMult, int bonusPoints)
+{
+    auto bucket = [](const Qso& q) -> QString {
+        // Prefer MODETEST (submode): PH / CW / DG. Else infer from MODE.
+        const QString mt = q.submode.toUpper();
+        if (mt == "PH" || mt == "CW" || mt == "DG") return mt;
+        const QString m = q.mode.toUpper();
+        if (m == "CW") return "CW";
+        if (m == "SSB" || m == "AM" || m == "FM" || m == "PH" || m == "PHONE" ||
+            m == "USB" || m == "LSB") return "PH";
+        // everything else (FT8, FT4, RTTY, PSK, MFSK, DIGITAL, DATA...) = digital
+        return "DG";
+    };
+
+    int nPhone = 0, nCw = 0, nDig = 0;
+    for (const auto& q : qsos) {
+        const QString b = bucket(q);
+        if (b == "PH") ++nPhone;
+        else if (b == "CW") ++nCw;
+        else ++nDig;
+    }
+    const int qsoPoints = nPhone * 1 + nCw * 2 + nDig * 2;
+    const int mult = (powerMult >= 1 && powerMult <= 5) ? powerMult : 2;
+    const int total = qsoPoints * mult + bonusPoints;
+
+    QJsonObject byMode;
+    byMode["phone"]   = nPhone;
+    byMode["cw"]      = nCw;
+    byMode["digital"] = nDig;
+
+    QJsonObject o;
+    o["qso_count"]      = nPhone + nCw + nDig;
+    o["qsos_by_class"]  = byMode;
+    o["qso_points"]     = qsoPoints;       // phone×1 + (cw+dig)×2
+    o["power_multiplier"] = mult;
+    o["bonus_points"]   = bonusPoints;
+    o["total_score"]    = total;
+    o["formula"]        = QStringLiteral("(%1 qso pts x %2) + %3 bonus = %4")
+                              .arg(qsoPoints).arg(mult).arg(bonusPoints).arg(total);
+    return o;
+}
+
 // Construct a Qso from JSON.  Required fields:
 //   call, qso_date (YYYYMMDD), time_on (HHMM or HHMMSS), band, mode
 // Anything else is optional.  `missing` collects the names of any required
@@ -285,6 +336,23 @@ void HttpServer::onNewConnection()
                     body["limit"] = f.limit;
                     body["qsos"]  = arr;
                     response = jsonResp(200, "OK", body);
+                }
+            }
+            // ─── GET /api/score ───  ARRL Field Day live score
+            else if (req.method == "GET" && path == "/api/score") {
+                if (!m_model || !m_model->isOpen()) {
+                    response = jsonError(503, "Service Unavailable",
+                                         QStringLiteral("logbook not open"));
+                } else {
+                    // power multiplier + bonus points are station settings passed in
+                    // as query params (?mult=2&bonus=400); sensible FD defaults otherwise.
+                    bool okM = false, okB = false;
+                    const int mult  = qs.queryItemValue("mult").toInt(&okM);
+                    const int bonus = qs.queryItemValue("bonus").toInt(&okB);
+                    LogbookFilter f;            // limit 0 == all QSOs
+                    const auto rows = m_model->queryQsos(f);
+                    response = jsonResp(200, "OK",
+                        computeFdScore(rows, okM ? mult : 2, okB ? bonus : 0));
                 }
             }
             // ─── POST /api/qsos ───
