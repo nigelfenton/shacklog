@@ -15,6 +15,13 @@ macOS DMG and attaches them to the GitHub release.
 - **Server: N3FJP network mirror** — `N3fjpClient` connects to a remote N3FJP
   server and logs its QSOs into the local database.
 
+### Changed
+- **Unified ADIF parsing.** The server's WSJT-X UDP receiver used its own copy
+  of the ADIF field parser; it now uses the shared `AdifReader` (same parser as
+  File → Import ADIF). As a side benefit, WSJT-X ingest now gets band-from-freq
+  derivation, the MODE:USB/LSB → SSB+SUBMODE fold, and QSL/LoTW/eQSL field
+  handling it previously lacked. Verified end-to-end with a live FT8 datagram.
+
 ## [0.3.2] — 2026-06-12
 
 ### Added

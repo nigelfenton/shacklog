@@ -37,9 +37,8 @@ items live in the [CHANGELOG](CHANGELOG.md).
 
 ## Housekeeping / tech debt
 
-- **Consolidate ADIF parsing** — `server/WsjtxAdifReceiver` still carries its
-  own ADIF field parser; fold it onto the shared `AdifReader` so there is one
-  parser to maintain. *(Done — see CHANGELOG once landed.)*
+- Ongoing: keep the client and server sharing one implementation of each
+  concern (ADIF parsing is now unified; watch for future drift).
 
 ---
 
