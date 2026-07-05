@@ -65,6 +65,9 @@ set(SHACKLOG_SOURCES
     src/CtyDat.h
     src/CallsignLookup.cpp
     src/CallsignLookup.h
+    # ── APRS over AetherSDR's KISS-over-TCP TNC (activity + messaging) ──
+    src/AprsDecode.cpp
+    src/AprsDecode.h
     data/cty.qrc
 )
 
@@ -177,4 +180,19 @@ if(MSVC)
     target_compile_definitions(shacklog-server PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 else()
     target_compile_options(shacklog-server PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# ── Tests (opt-in: -DSHACKLOG_TESTS=ON) ─────────────────────────────────
+option(SHACKLOG_TESTS "Build ShackLog unit tests" OFF)
+if(SHACKLOG_TESTS)
+    enable_testing()
+
+    add_executable(aprs_decode_test
+        tests/aprs_decode_test.cpp
+        src/AprsDecode.cpp
+        src/AprsDecode.h
+    )
+    target_include_directories(aprs_decode_test PRIVATE src)
+    target_link_libraries(aprs_decode_test PRIVATE Qt6::Core)
+    add_test(NAME aprs_decode_test COMMAND aprs_decode_test)
 endif()
