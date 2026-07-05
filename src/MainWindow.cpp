@@ -11,6 +11,7 @@
 #include "PotaClient.h"
 #include "CallsignLookup.h"
 #include "SectionMapDialog.h"
+#include "AprsActivityDialog.h"
 #include "AetherSettingsReader.h"
 
 #include <QDialog>
@@ -343,6 +344,7 @@ void MainWindow::buildMenus()
     m_actConnectTci    = toolsMenu->addAction("&Connect TCI",    this, &MainWindow::onConnectTci);
     m_actDisconnectTci = toolsMenu->addAction("&Disconnect TCI", this, &MainWindow::onDisconnectTci);
     toolsMenu->addSeparator();
+    m_actAprsActivity  = toolsMenu->addAction("&APRS Activity…", this, &MainWindow::onShowAprsActivity);
     m_actDxcLog        = toolsMenu->addAction("DX Cluster &Log…", this, &MainWindow::onShowClusterLog);
     m_actSpotIndex     = toolsMenu->addAction("Show Spot &Index…", this, &MainWindow::onShowSpotIndex);
 
@@ -368,6 +370,20 @@ void MainWindow::onShowSectionMap()
     m_sectionMap->show();
     m_sectionMap->raise();
     m_sectionMap->activateWindow();
+}
+
+void MainWindow::onShowAprsActivity()
+{
+    if (!m_model) return;
+    if (!m_aprsActivity) {
+        m_aprsActivity = new AprsActivityDialog(m_model, this);
+        m_aprsActivity->setAttribute(Qt::WA_DeleteOnClose);
+        connect(m_aprsActivity, &QObject::destroyed, this,
+                [this]() { m_aprsActivity = nullptr; });
+    }
+    m_aprsActivity->show();
+    m_aprsActivity->raise();
+    m_aprsActivity->activateWindow();
 }
 
 // ── Layout ─────────────────────────────────────────────────────────────

@@ -38,6 +38,7 @@ class DxClusterClient;
 class PotaClient;
 class CallsignLookup;
 class SectionMapDialog;
+class AprsActivityDialog;
 struct SpotData;
 namespace Server { class WsjtxAdifReceiver; }
 
@@ -66,6 +67,7 @@ private slots:
     void onSwitchLog();
     void onShowAwards();
     void onShowSectionMap();
+    void onShowAprsActivity();
     void onHowFar();
     void onImportAdif();
     void onExportAdif();
@@ -143,6 +145,7 @@ private:
     CallsignLookup*  m_lookup{nullptr};  // online QRZ / HamQTH / callook
     QTimer*          m_lookupDebounce{nullptr};  // typed-call settle timer
     SectionMapDialog* m_sectionMap{nullptr};     // non-modal, lazily created
+    AprsActivityDialog* m_aprsActivity{nullptr}; // non-modal, lazily created
     Qso     m_lookupFill;        // pending details for the next save…
     QString m_lookupFillCall;    // …valid only while the call field matches
     QString m_operatorCall;          // whose log is open (multi-log)
@@ -196,6 +199,7 @@ private:
     QAction* m_actSwitchLog{};
     QAction* m_actAwards{};
     QAction* m_actSectionMap{};
+    QAction* m_actAprsActivity{};
     QAction* m_actHowFarMap{};
     QAction* m_actImportAdif{};
     QAction* m_actExportAdif{};

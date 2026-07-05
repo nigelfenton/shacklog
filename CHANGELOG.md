@@ -9,6 +9,15 @@ macOS DMG and attaches them to the GitHub release.
 ## [Unreleased]
 
 ### Added
+- **APRS Activity window** (Tools → APRS Activity) — connects to AetherSDR's
+  KISS-over-TCP TNC (default `127.0.0.1:8001`), decodes the off-air AX.25/APRS
+  traffic, and shows a live roster of heard stations with great-circle
+  distance/bearing from `MY_GRIDSQUARE`, time-since-heard, APRS symbol, and a ✓
+  against any call already in the log. Stale stations age out (default 1 h).
+  A message row sends APRS text back out through AetherSDR. The decoder
+  (`AprsDecode`) is a clean-room KISS/AX.25/APRS implementation with 23 unit
+  tests (build with `-DSHACKLOG_TESTS=ON`); the socket client
+  (`AprsKissClient`) auto-reconnects like the TCI client.
 - **Server: live ARRL Field Day score** — `GET /api/score` returns a JSON
   breakdown (QSO points × power multiplier + bonus), classifying phone/CW/
   digital per FD rules; power multiplier and bonus are query params.
