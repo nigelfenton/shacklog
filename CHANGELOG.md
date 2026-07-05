@@ -1,0 +1,77 @@
+# Changelog
+
+All notable changes to ShackLog are recorded here. The format follows
+[Keep a Changelog](https://keepachangelog.com/), and the project uses
+[semantic versioning](https://semver.org/). Releases are cut by pushing a
+`vX.Y.Z` tag; CI then builds the Windows installer + zip, Linux AppImage, and
+macOS DMG and attaches them to the GitHub release.
+
+## [Unreleased]
+
+### Added
+- **Server: live ARRL Field Day score** — `GET /api/score` returns a JSON
+  breakdown (QSO points × power multiplier + bonus), classifying phone/CW/
+  digital per FD rules; power multiplier and bonus are query params.
+- **Server: N3FJP network mirror** — `N3fjpClient` connects to a remote N3FJP
+  server and logs its QSOs into the local database.
+
+## [0.3.2] — 2026-06-12
+
+### Added
+- **Section map** (Maps menu) — a native, N3FJP-style ARRL/RAC section map.
+
+## [0.3.1] — 2026-06-12
+
+### Fixed
+- Callsign-lookup XML parsing: QRZ/HamQTH responses were consumed whole by
+  `readElementText()` on a container element, so the session id never parsed
+  and login always "failed". Replaced with a leaf-text token walk.
+- DX cluster duplicate-login ping-pong: two clients on one call-SSID kicked
+  each other in a ~1 s reconnect storm. Reconnect backoff now only resets
+  after sustained uptime, kicks are detected and surfaced to the operator,
+  and a kicked client backs off to 30 s.
+
+## [0.3.0] — 2026-06-12
+
+### Added
+- **Callsign lookup chain** — three-tier autofill of empty QSO fields at save:
+  worked-before → offline cty.dat prefix resolver → online (QRZ / HamQTH /
+  callook.info). Bundled `cty.dat` as a Qt resource; new Settings → Lookup tab.
+
+## [0.2.0] — 2026-06-10
+
+### Added
+- **ADIF file import** (File → Import ADIF) — whole-file, single-transaction,
+  deduplicated import via a shared byte-oriented ADIF reader. Proven on a real
+  16k+ record HRD export.
+- **Multi-operator logs** — one SQLite database per callsign, with a startup
+  operator chooser and live *Switch Operator/Log*.
+- **Awards panel** (Tools → Awards) — DXCC / WAS / WAC / WAZ / grids, worked vs
+  confirmed, with chase lists.
+- **"How far?"** button — opens a PSK Reporter map filtered to your callsign
+  and current band.
+- **Desktop WSJT-X ingest** — logs WSJT-X "Secondary UDP" QSOs straight into
+  the open log (solo-operating mode).
+- **Server (Field Day infrastructure)** — headless companion exposing an HTTP
+  API (`/api/qsos`) and an N3FJP-compatible TCP endpoint, writing into the
+  shared logbook with schema versioning, an audit trail, and soft-delete;
+  ingests WSJT-X Secondary-UDP spots.
+
+### Changed
+- Cross-platform verified on Windows, Linux, and macOS. Build fixed on Qt 6.4
+  (`QWebSocket::errorOccurred` is Qt 6.5+).
+
+## [0.1.2] — 2026-05-08
+
+### Added
+- Initial release: SQLite-backed logbook, TCI WebSocket auto-fill of freq /
+  band / mode, quick QSO entry with live duplicate check, filterable QSO
+  table, full-fidelity QSO editor, ADIF 3.1.4 and Cabrillo 3.0 export, and a
+  cross-platform GitHub Actions release workflow.
+
+[Unreleased]: https://github.com/nigelfenton/shacklog/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/nigelfenton/shacklog/releases/tag/v0.3.2
+[0.3.1]: https://github.com/nigelfenton/shacklog/releases/tag/v0.3.1
+[0.3.0]: https://github.com/nigelfenton/shacklog/releases/tag/v0.3.0
+[0.2.0]: https://github.com/nigelfenton/shacklog/releases/tag/v0.2.0
+[0.1.2]: https://github.com/nigelfenton/shacklog/releases/tag/v0.1.2
