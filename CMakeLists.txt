@@ -68,6 +68,12 @@ set(SHACKLOG_SOURCES
     # ── APRS over AetherSDR's KISS-over-TCP TNC (activity + messaging) ──
     src/AprsDecode.cpp
     src/AprsDecode.h
+    src/AprsKissClient.cpp
+    src/AprsKissClient.h
+    src/AprsStationModel.cpp
+    src/AprsStationModel.h
+    src/AprsActivityDialog.cpp
+    src/AprsActivityDialog.h
     data/cty.qrc
 )
 
